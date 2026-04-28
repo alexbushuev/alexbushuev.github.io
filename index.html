@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Александр Бушуев — Аналитик данных</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="bg-mesh">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <!-- ===== STICKY NAVBAR: left | center | right ===== -->
+  <header class="navbar">
+
+    <div class="navbar-brand">
+      <span class="brand-name" data-i18n="brand.name">Александр Бушуев</span>
+      <span class="brand-sep">/</span>
+      <span class="brand-title" data-i18n="brand.title">Аналитик данных</span>
+    </div>
+
+    <div class="navbar-contacts">
+      <a href="mailto:alexbushuev.94@gmail.com" class="nc-link">alexbushuev.94@gmail.com</a>
+      <span class="nc-dot"></span>
+      <span class="nc-link">+7 912 638-49-19</span>
+      <span class="nc-dot"></span>
+      <span class="nc-link"><span data-i18n="resume.city">Москва</span></span>
+      <span class="nc-dot"></span>
+      <a href="https://t.me/bushuevan" target="_blank" class="nc-link">@bushuevan</a>
+    </div>
+
+    <div class="navbar-controls">
+      <div class="lang-switcher">
+        <button class="lang-btn active" data-lang="ru">RU</button>
+        <span class="lang-sep">|</span>
+        <button class="lang-btn" data-lang="en">EN</button>
+      </div>
+      <button class="theme-btn" id="themeToggle" aria-label="Toggle theme">
+        <span class="theme-icon">☀️</span>
+      </button>
+    </div>
+
+  </header>
+
+  <!-- ===== HERO — always visible ===== -->
+  <section class="hero-section">
+    <div class="hero-inner">
+
+      <div class="hero-left">
+        <p class="hero-eyebrow" data-i18n="hero.eyebrow">Открыт к новым возможностям</p>
+        <h1 class="hero-name" data-i18n="hero.name">Александр Бушуев</h1>
+        <p class="hero-role" data-i18n="hero.role">Аналитик данных &amp; Tech Lead</p>
+        <p class="hero-bio" data-i18n="hero.bio">Аналитик данных и Tech Lead с 5+ годами опыта в e-commerce. Специализируюсь на BI-отчётности и аналитической инфраструктуре: SQL, Power BI, DataLens, Python. Разработанные дашборды используют 2 000+ сотрудников ежедневно, одно аналитическое решение принесло ~100 млн ₽ экономии чистой прибыли в месяц.</p>
+      </div>
+
+      <div class="hero-right">
+        <a href="mailto:alexbushuev.94@gmail.com" class="hc-item">
+          <span class="hc-icon">✉</span>
+          <span class="hc-text">alexbushuev.94@gmail.com</span>
+        </a>
+        <a href="tel:+79126384919" class="hc-item">
+          <span class="hc-icon">☎</span>
+          <span class="hc-text">+7 912 638-49-19</span>
+        </a>
+        <span class="hc-item">
+          <span class="hc-icon">◎</span>
+          <span class="hc-text" data-i18n="resume.city.long">Москва, Россия</span>
+        </span>
+        <a href="https://t.me/bushuevan" target="_blank" class="hc-item">
+          <span class="hc-icon">✈</span>
+          <span class="hc-text">@bushuevan</span>
+        </a>
+      </div>
+
+      <div class="hero-actions">
+        <button class="btn btn-primary" id="contactBtn" data-i18n="hero.contact">Связаться</button>
+        <a href="BushuevA_RU.pdf" class="btn btn-secondary" id="downloadBtn" download data-i18n="hero.download">Скачать резюме</a>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===== TAB SWITCHER ===== -->
+  <div class="tab-bar">
+    <nav class="tabs">
+      <button class="tab active" data-tab="portfolio" data-i18n="nav.portfolio">Портфолио</button>
+      <button class="tab" data-tab="resume" data-i18n="nav.resume">Резюме</button>
+    </nav>
+  </div>
+
+  <!-- ===== CONTENT ===== -->
+  <main>
+
+    <!-- PORTFOLIO -->
+    <section id="portfolio" class="tab-content active">
+
+      <div class="section-block">
+        <h2 class="section-title" data-i18n="skills.title">Навыки</h2>
+        <div class="card section-panel">
+          <div class="skills-grid">
+            <span class="skill-badge">SQL (Advanced)</span>
+            <span class="skill-badge">Python</span>
+            <span class="skill-badge">Power BI</span>
+            <span class="skill-badge">DAX</span>
+            <span class="skill-badge">DataLens</span>
+            <span class="skill-badge">Power Query</span>
+            <span class="skill-badge">Pandas</span>
+            <span class="skill-badge">NumPy</span>
+            <span class="skill-badge">Matplotlib</span>
+            <span class="skill-badge">ETL/ELT</span>
+            <span class="skill-badge">A/B Testing</span>
+            <span class="skill-badge">Data Modeling</span>
+            <span class="skill-badge">Git</span>
+            <span class="skill-badge">Excel</span>
+            <span class="skill-badge">Seaborn</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-block">
+        <h2 class="section-title" data-i18n="projects.title">Кейсы</h2>
+        <div class="projects-grid">
+
+          <div class="card project-card">
+            <div class="project-icon">🎯</div>
+            <h3 class="project-name" data-i18n="project1.name">Defect Rate Report</h3>
+            <p class="project-desc" data-i18n="project1.desc">Выявил системный рост дефектных заказов и с нуля разработал отчёт (SQL + Power BI). Снижение доли брака на 50%, экономия ~100 млн ₽ чистой прибыли в месяц.</p>
+            <div class="project-tags">
+              <span class="tag">SQL</span>
+              <span class="tag">Power BI</span>
+              <span class="tag">DAX</span>
+              <span class="tag">Data Analysis</span>
+            </div>
+            <div class="project-metric" data-i18n="project1.metric">−50% брака · ~100 млн ₽/мес</div>
+          </div>
+
+          <div class="card project-card">
+            <div class="project-icon">📊</div>
+            <h3 class="project-name" data-i18n="project2.name">Operational Dashboard Suite</h3>
+            <p class="project-desc" data-i18n="project2.desc">Спроектировал и вывел в production 30+ регулярных дашбордов (Power BI / DataLens) для кросс-функциональных команд. Сокращение time-to-insight по ключевым операционным метрикам.</p>
+            <div class="project-tags">
+              <span class="tag">Power BI</span>
+              <span class="tag">DataLens</span>
+              <span class="tag">Data Modeling</span>
+              <span class="tag">DAX</span>
+            </div>
+            <div class="project-metric" data-i18n="project2.metric">2 000+ DAU · 30+ дашбордов</div>
+          </div>
+
+          <div class="card project-card">
+            <div class="project-icon">🤖</div>
+            <h3 class="project-name" data-i18n="project4.name">Logistics KPI Automation</h3>
+            <p class="project-desc" data-i18n="project4.desc">Автоматизировал ежедневную операционную отчётность по KPI логистики с помощью Python (Pandas) + SQL. Устранена рутинная ручная работа для всей команды.</p>
+            <div class="project-tags">
+              <span class="tag">Python</span>
+              <span class="tag">Pandas</span>
+              <span class="tag">SQL</span>
+              <span class="tag">Automation</span>
+            </div>
+            <div class="project-metric" data-i18n="project4.metric">~15 ч/нед ручной работы устранено</div>
+          </div>
+
+          <div class="card project-card">
+            <div class="project-icon">⚡</div>
+            <h3 class="project-name" data-i18n="project3.name">DataLens Migration</h3>
+            <p class="project-desc" data-i18n="project3.desc">Инициировал и реализовал перевод аналитической инфраструктуры на DataLens. Унифицировал слои трансформации данных, что сократило среднее время разработки новых дашбордов.</p>
+            <div class="project-tags">
+              <span class="tag">DataLens</span>
+              <span class="tag">ETL/ELT</span>
+              <span class="tag">Architecture</span>
+              <span class="tag">Data Modeling</span>
+            </div>
+            <div class="project-metric" data-i18n="project3.metric">Ускорение разработки · Унификация стека</div>
+          </div>
+
+          <div class="card project-card">
+            <div class="project-icon">🏆</div>
+            <h3 class="project-name" data-i18n="project5.name">Analytics Team Development</h3>
+            <p class="project-desc" data-i18n="project5.desc">Выстроил систему менторства для 5 аналитиков: 3 из 5 получили повышение до Senior за 2 года. Внедрил стандарты code review и шаблоны архитектурных решений.</p>
+            <div class="project-tags">
+              <span class="tag">Team Lead</span>
+              <span class="tag">Mentoring</span>
+              <span class="tag">Code Review</span>
+              <span class="tag">Standards</span>
+            </div>
+            <div class="project-metric" data-i18n="project5.metric">3 из 5 → Senior за 2 года</div>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- RESUME -->
+    <section id="resume" class="tab-content">
+
+      <div class="resume-layout">
+
+        <!-- LEFT COLUMN -->
+        <div class="resume-left">
+
+          <div class="card resume-card">
+            <h2 class="resume-section-title" data-i18n="resume.contact">Контакты</h2>
+            <ul class="contact-list">
+              <li><span class="contact-icon">✉️</span><a href="mailto:alexbushuev.94@gmail.com">alexbushuev.94@gmail.com</a></li>
+              <li><span class="contact-icon">📞</span><a href="tel:+79126384919">+7 912 638-49-19</a></li>
+              <li><span class="contact-icon">✈️</span><a href="https://t.me/bushuevan" target="_blank">@bushuevan</a></li>
+              <li><span class="contact-icon">📍</span><span data-i18n="resume.city.long">Москва, Россия</span></li>
+            </ul>
+          </div>
+
+          <div class="card resume-card">
+            <h2 class="resume-section-title" data-i18n="resume.skills">Навыки</h2>
+            <div class="skill-group">
+              <div class="skill-group-title" data-i18n="skills.cat.languages">Языки</div>
+              <div class="skills-grid small">
+                <span class="skill-badge">SQL</span>
+                <span class="skill-badge">Python</span>
+              </div>
+            </div>
+            <div class="skill-group">
+              <div class="skill-group-title" data-i18n="skills.cat.bi">BI & Визуализация</div>
+              <div class="skills-grid small">
+                <span class="skill-badge">Power BI</span>
+                <span class="skill-badge">DataLens</span>
+                <span class="skill-badge">DAX</span>
+                <span class="skill-badge">Power Query</span>
+              </div>
+            </div>
+            <div class="skill-group">
+              <div class="skill-group-title" data-i18n="skills.cat.analytics">Аналитика</div>
+              <div class="skills-grid small">
+                <span class="skill-badge">A/B Testing</span>
+                <span class="skill-badge">KPI Trees</span>
+                <span class="skill-badge">Data Quality</span>
+              </div>
+            </div>
+            <div class="skill-group">
+              <div class="skill-group-title" data-i18n="skills.cat.tools">Инструменты</div>
+              <div class="skills-grid small">
+                <span class="skill-badge">Git</span>
+                <span class="skill-badge">ETL/ELT</span>
+                <span class="skill-badge">Excel</span>
+                <span class="skill-badge">Pandas</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card resume-card">
+            <h2 class="resume-section-title" data-i18n="resume.education">Образование</h2>
+            <div class="timeline-item">
+              <div class="timeline-period">2014 — 2018</div>
+              <div class="timeline-title" data-i18n="edu1.name">Уральский федеральный университет</div>
+              <div class="timeline-sub" data-i18n="edu1.degree1">Магистратура — Математическое моделирование, 2018</div>
+              <div class="timeline-sub" data-i18n="edu1.degree2">Бакалавриат — Математическое моделирование, 2016</div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-period" data-i18n="edu.courses.label">Курсы</div>
+              <ul class="timeline-bullets">
+                <li>Яндекс.Практикум — Аналитика данных</li>
+                <li>Microsoft Learn — Power BI PL-300</li>
+                <li>Karpov.Courses — Симулятор аналитика</li>
+                <li>SQL-EX.RU · Stepik Python · Power BI Design</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card resume-card">
+            <h2 class="resume-section-title" data-i18n="resume.languages">Языки</h2>
+            <ul class="contact-list">
+              <li><span class="contact-icon">🇷🇺</span><span data-i18n="lang.ru">Русский — родной</span></li>
+              <li><span class="contact-icon">🇬🇧</span><span data-i18n="lang.en">Английский — B1–B2</span></li>
+            </ul>
+          </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="resume-right">
+
+          <div class="card resume-card">
+            <h2 class="resume-section-title" data-i18n="resume.experience">Опыт работы</h2>
+
+            <div class="timeline-item">
+              <div class="timeline-period">01/2025 — <span data-i18n="exp.present">настоящее время</span></div>
+              <div class="timeline-title" data-i18n="exp1.company">Tech Lead, Data &amp; Analytics · Lamoda</div>
+              <div class="timeline-sub" data-i18n="exp1.context">e-commerce, топ-5 онлайн-ретейлеров СНГ, ~30 млн пользователей</div>
+              <ul class="timeline-bullets">
+                <li data-i18n="exp1.bullet1">Руковожу командой 2–3 аналитиков: data modeling стандарты, code review, бэклог и stakeholder management</li>
+                <li data-i18n="exp1.bullet2">Инициировал переход аналитической инфраструктуры на DataLens: унификация трансформаций, ускорение разработки</li>
+                <li data-i18n="exp1.bullet3">Регулярно готовлю C-level аналитику по KPI склада, логистики и качества заказов</li>
+              </ul>
+            </div>
+
+            <div class="timeline-item">
+              <div class="timeline-period">2023 — 01/2025</div>
+              <div class="timeline-title" data-i18n="exp2.company">Senior Data Analyst · Lamoda</div>
+              <ul class="timeline-bullets">
+                <li data-i18n="exp2.bullet1">Выявил рост дефектных заказов → разработал Defect Rate report (SQL + Power BI) → −50% брака, ~100 млн ₽/мес экономии</li>
+                <li data-i18n="exp2.bullet2">Вывел в production 30+ дашбордов (Power BI / DataLens) → 2 000+ DAU, снижение time-to-insight</li>
+                <li data-i18n="exp2.bullet3">Менторство 5 аналитиков: 3 из 5 выросли до Senior за 2 года; внедрил стандарты code review</li>
+                <li data-i18n="exp2.bullet4">Автоматизировал KPI-отчётность логистики (Python + SQL) → устранил ~15 ч/нед ручной работы</li>
+              </ul>
+            </div>
+
+            <div class="timeline-item">
+              <div class="timeline-period">02/2022 — 2023</div>
+              <div class="timeline-title" data-i18n="exp3.company">Middle Data Analyst · Lamoda</div>
+              <ul class="timeline-bullets">
+                <li data-i18n="exp3.bullet1">SQL-запросы для операционной отчётности: витрины >100 млн строк, оконные функции, CTE</li>
+                <li data-i18n="exp3.bullet2">Создал первые Power BI шаблоны по качеству заказов — основа для масштабирования на весь операционный блок</li>
+              </ul>
+            </div>
+
+            <div class="timeline-item">
+              <div class="timeline-period">2016 — 2022</div>
+              <div class="timeline-title" data-i18n="exp4.company">Инженер-конструктор · ОКБ «Новатор»</div>
+              <div class="timeline-sub" data-i18n="exp4.location">Екатеринбург</div>
+              <ul class="timeline-bullets">
+                <li data-i18n="exp4.bullet1">Количественный анализ испытательных данных, автоматизация обработки в Excel и Python</li>
+              </ul>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer>
+    <p data-i18n="footer.text">© 2026 Александр Бушуев. Сделано с ❤️ и кофе.</p>
+  </footer>
+
+  <!-- ===== CONTACT MODAL ===== -->
+  <div class="modal-overlay" id="contactModal">
+    <div class="modal-card">
+      <button class="modal-close" id="modalClose" aria-label="Close">✕</button>
+      <p class="modal-title" data-i18n="modal.title">Связаться</p>
+      <a href="tel:+79126384919" class="modal-btn">
+        <span class="modal-btn-icon">📞</span>
+        <span data-i18n="modal.call">Позвонить</span>
+      </a>
+      <a href="https://t.me/bushuevan" target="_blank" class="modal-btn">
+        <span class="modal-btn-icon">✈</span>
+        <span data-i18n="modal.telegram">Написать в Telegram</span>
+      </a>
+      <a href="mailto:alexbushuev.94@gmail.com" class="modal-btn">
+        <span class="modal-btn-icon">✉</span>
+        <span data-i18n="modal.email">Написать email</span>
+      </a>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
