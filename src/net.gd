@@ -19,6 +19,8 @@ var pending: Array = []
 var _upload_t := -1.0
 var _uploading := false
 var _js_cb: Variant = null
+var race_running := false      # the game is in a race: background work waits
+var _finishing: Array = []      # races whose rivals are still being ridden to the line
 
 func _ready() -> void:
 	base = api_base()
@@ -163,6 +165,7 @@ func mark_dirty() -> void:
 		_upload_t = 2.0
 
 func _process(delta: float) -> void:
+	_ride_rivals()
 	if _upload_t < 0.0 or _uploading:
 		return
 	_upload_t -= delta
@@ -220,11 +223,35 @@ func send_result(sim: Sim, kind: String) -> void:
 		result_answer.emit(data)
 		flush_pending())
 
+# After your race the rivals still out there ride on, a little each frame, then their times and knockouts go up too
+func finish_bots(sim: Sim) -> void:
+	if not logged_in():
+		return
+	sim.start_solo()
+	_finishing.append(sim)
+
+func _ride_rivals() -> void:
+	if _finishing.is_empty() or race_running:
+		return
+	var sim: Sim = _finishing[0]
+	var t0 := Time.get_ticks_usec()
+	while Time.get_ticks_usec() - t0 < 6000:
+		if sim.solo_done():
+			_finishing.pop_front()
+			var body := {"_path": "/bots", "track": str(sim.tr.id), "bots": sim.bot_stats()}
+			pending.append(body)
+			_save_acc()
+			flush_pending()
+			return
+		sim.step_rivals(1.0 / 20.0)
+
 func flush_pending() -> void:
 	if pending.is_empty() or not logged_in():
 		return
-	var body: Dictionary = pending[0]
-	call_api(HTTPClient.METHOD_POST, "/result", body, func(_data: Variant, err: String) -> void:
+	var body: Dictionary = pending[0].duplicate()
+	var path: String = str(body.get("_path", "/result"))
+	body.erase("_path")
+	call_api(HTTPClient.METHOD_POST, path, body, func(_data: Variant, err: String) -> void:
 		if err.begins_with("Нет связи"):
 			return
 		pending.pop_front()

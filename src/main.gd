@@ -2,7 +2,7 @@ extends Node
 # Screens: menu, garage, shop, bar, start screen, race, result.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 8
+const BUILD_NO := 9
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -457,6 +457,7 @@ func _show_result(kind: String) -> void:
 	res["time"] = sim.stats.t_finish if kind == "finish" else -1.0
 	res["cat"] = int(sim.tr.cat)
 	N.send_result(sim, kind)
+	N.finish_bots(sim)
 	_result_screen(res)
 
 func _result_screen(res: Dictionary) -> void:
@@ -490,12 +491,16 @@ func _result_screen(res: Dictionary) -> void:
 				return
 			if d.has("error"):
 				rec_l.text = "Не отправилось: " + str(d.error) + (", отправлю позже" if N.pending.size() > 0 else "")
-			elif d.get("best", false):
-				rec_l.text = "Новый личный рекорд, %d место в таблице" % int(d.rank)
-			elif d.get("rank") != null:
-				rec_l.text = "В таблице ты %d-й" % int(d.rank)
 			else:
-				rec_l.text = "Нокауты записаны в таблицу бойцов", CONNECT_ONE_SHOT)
+				var parts: Array = []
+				if d.get("best", false):
+					parts.append("новый рекорд, %d-й по времени" % int(d.rank))
+				elif d.get("rank") != null:
+					parts.append("%d-й по времени" % int(d.rank))
+				if d.get("ko_best", false):
+					parts.append("лучший заезд по нокаутам, %d-й" % int(d.ko_rank))
+				var line: String = ", ".join(parts)
+				rec_l.text = (line.substr(0, 1).to_upper() + line.substr(1)) if line != "" else "Записано", CONNECT_ONE_SHOT)
 	v.add_child(title_row)
 	v.add_child(UiKit.label(res.text, font_mid, 16, UiKit.PAPER, true))
 	if res.note != "":
@@ -561,6 +566,7 @@ func _notification(what: int) -> void:
 			_toggle_pause()
 
 func _process(delta: float) -> void:
+	N.race_running = running and not paused
 	if not running or sim == null:
 		return
 	if paused:

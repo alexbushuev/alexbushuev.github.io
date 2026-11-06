@@ -78,6 +78,8 @@ class Rider:
 	var path := 0               # 0 the main road, i + 1 side road i
 	var ps := 0.0               # how far along the race, in main-road metres, whatever road he is on
 	var take := {}              # side road i -> will he take it
+	var finish_t := 0.0         # a rival's race time, for the records table
+	var ko_me := 0              # how many times this rival knocked you off
 	# rider's own flight while the bike slides
 	var fly_s := 0.0
 	var fly_d := 0.0
@@ -169,6 +171,7 @@ var banner_bad := false
 var say_txt := ""
 var rng := RandomNumberGenerator.new()
 var bot_branch := ""      # test bot at a fork: "" stays on the main road, "take" takes every side road
+var solo := false         # the race goes on without you: rivals ride their own race, nobody waits or catches up
 
 func ev(kind: String, a: Variant = null, b: Variant = null, c: Variant = null) -> void:
 	events.append([kind, a, b, c])
@@ -1292,10 +1295,14 @@ func _update_foe(f: Rider, dt: float) -> void:
 			tgt *= 1.06
 		if m.state == RIDE and dz < -2.0 and dz > -45.0 and (f.style == "brawler" or (f.style == "thief" and m.weapon != "none")):
 			tgt *= 1.07
-		if dz > 30.0:
+		if solo:
+			pass
+		elif dz > 30.0:
 			tgt *= 1.0 - clamp((dz - 30.0) / 250.0, 0.0, 0.18)
 		elif dz < -5.0 and f.lim > f.v:
 			tgt = min(f.lim, tgt * (1.0 + clamp((-dz - 5.0) / 83.0, 0.0, 0.3)))
+		# whatever he wants, his bike goes no faster than it goes: his times stand next to yours in the table
+		tgt = min(tgt, f.top)
 		if f.finished:
 			tgt = v_top * 0.6
 	if f.stun > 0.0:
@@ -1422,6 +1429,8 @@ func _update_foe(f: Rider, dt: float) -> void:
 					if could:
 						ev("hit", m, f.weapon)
 					hurt_me(w.foe * tr.foeDmg * (1.2 if f.is_cop else 1.0) * f.hit_mul, 1 if m.d >= f.d else -1)
+					if could and m.state == DOWN:
+						f.ko_me += 1
 					if could:
 						_say(f, 0.35)
 					var steal: float = 0.25 if f.is_cop else (0.36 if f.style == "thief" else 0.12)
@@ -1443,7 +1452,43 @@ func _update_foe(f: Rider, dt: float) -> void:
 				f.cd = rng.randf_range(1.3, 2.6) * (1.6 - f.aggr * 0.6)
 	if not f.is_cop and not f.finished and f.path == 0 and f.s >= road.finish_s:
 		f.finished = true
+		f.finish_t = t
 		order.append(f)
+
+# ---------- after you are done: the rivals still out there finish their race, for the records ----------
+func start_solo() -> void:
+	solo = true
+	phase = "race"
+	me.state = WAIT
+	me.s = -1e6
+	me.ps = -1e6
+	end_t = t
+
+func solo_done() -> bool:
+	if t - end_t > 240.0:
+		return true
+	for f in foes:
+		if not f.is_cop and not f.finished and not f.out:
+			return false
+	return true
+
+func step_rivals(dt: float) -> void:
+	t += dt
+	for f in foes:
+		_update_foe(f, dt)
+	for c in cars:
+		_update_car(c, dt)
+	events.clear()
+
+func bot_stats() -> Array:
+	var out: Array = []
+	for f in foes:
+		if f.is_cop or f.voice_id == "":
+			continue
+		var b: Dictionary = f.bike
+		out.append({"id": f.voice_id, "name": f.name, "bike": "%s %dcc" % [b.name, int(b.cc)], "finished": f.finished,
+			"time_ms": int(round(f.finish_t * 1000.0)) if f.finished else 0, "ko": f.ko_me, "ko_cops": 0})
+	return out
 
 func step(dt: float) -> void:
 	t += dt

@@ -68,9 +68,9 @@ func _ready() -> void:
 	while ans[0] == null:
 		await get_tree().process_frame
 	check(ans[0].get("best", false) and int(ans[0].rank) >= 1, "result recorded: " + str(ans[0]))
-	r = await _call(HTTPClient.METHOD_GET, "/records?track=dachi", null)
+	r = await _call(HTTPClient.METHOD_GET, "/records", null)
 	var mine := false
-	for row in r[0].rows:
+	for row in r[0].time.get("dachi", []):
 		if row.login == name and int(row.time_ms) == 61250 and str(row.bike) == "Dragonfly 50cc":
 			mine = true
 	check(mine, "my time in the table with the bike")
@@ -80,6 +80,28 @@ func _ready() -> void:
 		if row.login == name and int(row.ko) == 5 and int(row.ko_riders) == 4 and int(row.ko_cops) == 1:
 			f_ok = true
 	check(f_ok, "fighters table")
+	# the rivals of that race ride on to the line and go into the tables as players of their own
+	N.race_running = false
+	N.finish_bots(sim)
+	var waited := 0.0
+	var frames := 0
+	while not N._finishing.is_empty() and frames < 3000:
+		await get_tree().process_frame
+		frames += 1
+	print("rivals ridden to the line in %d frames, sim t %.0f" % [frames, sim.t])
+	await _wait(1.5)
+	r = await _call(HTTPClient.METHOD_GET, "/records", null)
+	var bots_in := 0
+	for row in r[0].time.get("dachi", []):
+		if int(row.bot) == 1:
+			bots_in += 1
+	check(bots_in > 0 and r[0].has("ko"), "rivals in the dachi time table: %d" % bots_in)
+	var seen := {}
+	var twice := false
+	for row in r[0].time.get("dachi", []):
+		twice = twice or seen.has(row.login + str(row.bot))
+		seen[row.login + str(row.bot)] = true
+	check(not twice and r[0].time.get("dachi", []).size() <= 10, "top ten, nobody twice")
 	# offline: the result waits
 	var real_base := N.base
 	N.base = "http://127.0.0.1:9/gaz-api"

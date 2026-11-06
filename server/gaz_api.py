@@ -9,7 +9,9 @@ import hashlib, hmac, json, os, re, secrets, sqlite3, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = 1
+VERSION = 2
+TOP = 10
+BOT_RE = re.compile(r"^[a-z]{2,12}$")
 DB = os.environ.get("GAZ_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "gaz.db"))
 PORT = int(os.environ.get("GAZ_PORT", "8787"))
 PREFIX = "/gaz-api"
@@ -28,7 +30,55 @@ create table if not exists records(user_id integer not null, track text not null
 create table if not exists results(id integer primary key, user_id integer not null, track text not null, time_ms integer,
   bike text, ko integer, ko_cops integer, finished integer, place integer, at integer not null);
 create index if not exists records_track on records(track, time_ms);
+create table if not exists ko_records(user_id integer not null, track text not null, ko integer not null, ko_riders integer not null,
+  ko_cops integer not null, bike text not null, at integer not null, primary key(user_id, track));
+create index if not exists ko_track on ko_records(track, ko);
 """
+
+
+def migrate(c):
+    cols = [r[1] for r in c.execute("pragma table_info(users)").fetchall()]
+    if "is_bot" not in cols:
+        c.execute("alter table users add column is_bot integer not null default 0")
+    # the knockouts tables came later: rebuild them from the results kept so far
+    if c.execute("select count(*) from ko_records").fetchone()[0] == 0:
+        for r in c.execute("select user_id, track, ko, ko_cops, bike, at from results where ko + ko_cops > 0 order by at").fetchall():
+            ko_best(c, r[0], r[1], r[2], r[3], r[4] or "", r[5])
+    c.commit()
+
+
+# one row per player and track: his best time, his best race by knockouts
+def time_best(c, uid, track, t, bike, now):
+    if not (20000 <= t <= 3600000):
+        return False
+    old = c.execute("select time_ms from records where user_id = ? and track = ?", (uid, track)).fetchone()
+    if old is None or t < old[0]:
+        c.execute("insert or replace into records(user_id, track, time_ms, bike, at) values(?,?,?,?,?)", (uid, track, t, bike, now))
+        return True
+    return False
+
+
+def ko_best(c, uid, track, ko, ko_cops, bike, now):
+    total = ko + ko_cops
+    if total <= 0:
+        return False
+    old = c.execute("select ko, ko_cops from ko_records where user_id = ? and track = ?", (uid, track)).fetchone()
+    if old is None or total > old[0] or (total == old[0] and ko_cops > old[1]):
+        c.execute("insert or replace into ko_records(user_id, track, ko, ko_riders, ko_cops, bike, at) values(?,?,?,?,?,?,?)",
+                  (uid, track, total, ko, ko_cops, bike, now))
+        return True
+    return False
+
+
+def bot_user(c, bid, name):
+    key = "bot:" + bid
+    row = c.execute("select id, login from users where login_key = ?", (key,)).fetchone()
+    if row is None:
+        cur = c.execute("insert into users(login, login_key, pw, created, is_bot) values(?,?,?,?,1)", (name, key, "!", int(time.time())))
+        return cur.lastrowid
+    if row[1] != name:
+        c.execute("update users set login = ? where id = ?", (name, row[0]))
+    return row[0]
 
 
 def db():
@@ -125,6 +175,12 @@ class H(BaseHTTPRequestHandler):
             raise Fail(401, "Вход устарел, войди снова")
         return row
 
+    def maybe_user(self, c):
+        try:
+            return self.user(c)
+        except Fail:
+            return None
+
     def route(self, method):
         path = urlparse(self.path).path
         if not path.startswith(PREFIX + "/"):
@@ -152,9 +208,15 @@ class H(BaseHTTPRequestHandler):
                     return self.result(c)
                 if method == "GET" and p == "/records":
                     return self.records(c)
+                if method == "POST" and p == "/bots":
+                    return self.bots(c)
                 if method == "GET" and p == "/fighters":
-                    rows = c.execute("select login, ko, ko_riders, ko_cops from users where ko > 0 order by ko desc, ko_cops desc, id limit 100").fetchall()
-                    return {"rows": [dict(r) for r in rows]}
+                    rows = c.execute("select login, ko, ko_riders, ko_cops, is_bot as bot from users where ko > 0 order by ko desc, ko_cops desc, id limit ?", (TOP,)).fetchall()
+                    out = {"rows": [dict(r) for r in rows]}
+                    me = self.maybe_user(c)
+                    if me is not None and me["ko"] > 0:
+                        out["mine"] = {"rank": 1 + c.execute("select count(*) from users where ko > ?", (me["ko"],)).fetchone()[0], "ko": me["ko"]}
+                    return out
         finally:
             c.close()
         raise Fail(404, "Нет такого")
@@ -225,33 +287,74 @@ class H(BaseHTTPRequestHandler):
                   (u["id"], track, t, bike, ko, ko_cops, int(finished), place, now))
         c.execute("update users set ko = ko + ?, ko_riders = ko_riders + ?, ko_cops = ko_cops + ? where id = ?",
                   (ko + ko_cops, ko, ko_cops, u["id"]))
-        best = False
-        if finished and 20000 <= t <= 3600000:
-            old = c.execute("select time_ms from records where user_id = ? and track = ?", (u["id"], track)).fetchone()
-            if old is None or t < old["time_ms"]:
-                c.execute("insert or replace into records(user_id, track, time_ms, bike, at) values(?,?,?,?,?)", (u["id"], track, t, bike, now))
-                best = True
+        best = finished and time_best(c, u["id"], track, t, bike, now)
+        ko_new = ko_best(c, u["id"], track, ko, ko_cops, bike, now)
         mine = c.execute("select time_ms from records where user_id = ? and track = ?", (u["id"], track)).fetchone()
         rank = None
         if mine:
             rank = 1 + c.execute("select count(*) from records where track = ? and time_ms < ?", (track, mine["time_ms"])).fetchone()[0]
-        return {"best": best, "rank": rank}
+        kmine = c.execute("select ko from ko_records where user_id = ? and track = ?", (u["id"], track)).fetchone()
+        ko_rank = None
+        if kmine:
+            ko_rank = 1 + c.execute("select count(*) from ko_records where track = ? and ko > ?", (track, kmine["ko"])).fetchone()[0]
+        return {"best": best, "rank": rank, "ko_best": ko_new, "ko_rank": ko_rank}
+
+    # The rivals of a race, each kept as a player of his own: his best time and best knockouts on this track
+    def bots(self, c):
+        u = self.user(c)
+        if limited(("bots", u["id"]), 120, 3600):
+            raise Fail(429, "Слишком много заездов за час")
+        b = self.body()
+        track = str(b.get("track", ""))
+        if not TRACK_RE.match(track):
+            raise Fail(400, "Нет такой трассы")
+        lst = b.get("bots")
+        if not isinstance(lst, list) or len(lst) > 14:
+            raise Fail(400, "Не понял запрос")
+        now = int(time.time())
+        n = 0
+        for x in lst:
+            if not isinstance(x, dict):
+                continue
+            bid = str(x.get("id", ""))
+            name = " ".join(str(x.get("name", "")).split())[:20]
+            if not BOT_RE.match(bid) or not name:
+                continue
+            uid = bot_user(c, bid, name)
+            bike = str(x.get("bike", ""))[:40]
+            ko = max(0, min(20, int(x.get("ko", 0))))
+            ko_cops = max(0, min(10, int(x.get("ko_cops", 0))))
+            if ko + ko_cops > 0:
+                c.execute("update users set ko = ko + ?, ko_riders = ko_riders + ?, ko_cops = ko_cops + ? where id = ?", (ko + ko_cops, ko, ko_cops, uid))
+            if x.get("finished"):
+                time_best(c, uid, track, int(x.get("time_ms", 0)), bike, now)
+            ko_best(c, uid, track, ko, ko_cops, bike, now)
+            n += 1
+        return {"ok": True, "bots": n}
+
 
     def records(self, c):
-        q = parse_qs(urlparse(self.path).query)
-        track = (q.get("track") or [""])[0]
-        sql = "select r.track, u.login, r.bike, r.time_ms, r.at from records r join users u on u.id = r.user_id"
-        if track:
-            if not TRACK_RE.match(track):
-                raise Fail(400, "Нет такой трассы")
-            rows = c.execute(sql + " where r.track = ? order by r.time_ms, r.at limit 100", (track,)).fetchall()
-            return {"rows": [dict(r) for r in rows]}
-        out = {}
-        for r in c.execute(sql + " order by r.track, r.time_ms, r.at").fetchall():
-            lst = out.setdefault(r["track"], [])
-            if len(lst) < 50:
-                lst.append({k: r[k] for k in ("login", "bike", "time_ms", "at")})
-        return {"tracks": out}
+        me = self.maybe_user(c)
+        out = {"time": {}, "ko": {}, "mine": {"time": {}, "ko": {}}}
+        sql_t = "select r.track, u.login, u.is_bot as bot, r.bike, r.time_ms, r.at from records r join users u on u.id = r.user_id order by r.track, r.time_ms, r.at"
+        for r in c.execute(sql_t).fetchall():
+            lst = out["time"].setdefault(r["track"], [])
+            if len(lst) < TOP:
+                lst.append({k: r[k] for k in ("login", "bot", "bike", "time_ms")})
+        sql_k = "select k.track, u.login, u.is_bot as bot, k.bike, k.ko, k.ko_riders, k.ko_cops from ko_records k join users u on u.id = k.user_id order by k.track, k.ko desc, k.ko_cops desc, k.at"
+        for r in c.execute(sql_k).fetchall():
+            lst = out["ko"].setdefault(r["track"], [])
+            if len(lst) < TOP:
+                lst.append({k: r[k] for k in ("login", "bot", "bike", "ko", "ko_riders", "ko_cops")})
+        if me is not None:
+            for r in c.execute("select track, time_ms from records where user_id = ?", (me["id"],)).fetchall():
+                rank = 1 + c.execute("select count(*) from records where track = ? and time_ms < ?", (r["track"], r["time_ms"])).fetchone()[0]
+                out["mine"]["time"][r["track"]] = {"rank": rank, "time_ms": r["time_ms"]}
+            for r in c.execute("select track, ko from ko_records where user_id = ?", (me["id"],)).fetchall():
+                rank = 1 + c.execute("select count(*) from ko_records where track = ? and ko > ?", (r["track"], r["ko"])).fetchone()[0]
+                out["mine"]["ko"][r["track"]] = {"rank": rank, "ko": r["ko"]}
+        out["tracks"] = out["time"]   # for a game page that has not updated yet
+        return out
 
     def handle_any(self, method):
         try:
@@ -288,6 +391,7 @@ def watch_self():
 def main():
     c = db()
     c.executescript(SCHEMA)
+    migrate(c)
     c.close()
     threading.Thread(target=watch_self, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
