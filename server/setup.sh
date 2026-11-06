@@ -87,18 +87,18 @@ say "Caddy"
 if grep -rqs 'gaz-api' /etc/caddy; then
   echo "Уже настроен"
 else
-  FILES=$( { echo "$CF"; grep -rlsF "$SITE" /etc/caddy 2>/dev/null || true; } | awk '!seen[$0]++')
+  FILES=$( { echo "$CF"; grep -rlisF "$SITE" /etc/caddy 2>/dev/null || true; } | awk '!seen[$0]++')
   PATCHED=""
   for F in $FILES; do
     [ -f "$F" ] || continue
     cp "$F" "$F.bak-gaz-api"
     if python3 - "$F" "$SITE" <<'PY'
 import re, sys
-path, site = sys.argv[1], sys.argv[2]
+path, site = sys.argv[1], sys.argv[2].lower()
 lines = open(path).read().split("\n")
 for i, l in enumerate(lines):
     code = l.split("#")[0]
-    if site not in code:
+    if site not in code.lower():
         continue
     # "site {"  or  "site" with the brace on the next line, also with other addresses or a scheme around it
     j = None
