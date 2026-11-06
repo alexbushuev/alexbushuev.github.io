@@ -2,7 +2,7 @@ extends Node
 # Screens: menu -> choose bike -> race -> result. Test build: no money or garage yet, those move over next.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 2
+const BUILD_NO := 3
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -337,6 +337,9 @@ func _run_shots() -> void:
 	if mode == "pose":
 		await _pose_shots(out)
 		return
+	if mode == "brake":
+		await _brake_shots(out)
+		return
 	var times: Array = str(args[4]).split(",")
 	var i := 0
 	Engine.max_fps = 0
@@ -392,4 +395,48 @@ func _pose_shots(out: String) -> void:
 		sim.step(STEP)
 	sim.events.clear()
 	await snap.call("down")
+	get_tree().quit()
+
+func _brake_shots(out: String) -> void:
+	sim.bot_peace = true
+	for k in 400:
+		sim.step(STEP)
+	sim.events.clear()
+	var me := sim.me
+	sim.bot = false
+	me.v = 8.0
+	sim.inp.steer = 0.0
+	sim.inp.gas = false
+	var i := 0
+	for kind in ["sedan", "van", "truck"]:
+		for c in sim.cars:
+			if c.dir > 0 and c.kind == kind:
+				c.s = me.s + 11.0 + c.len * 0.5
+				c.d = me.d
+				c.v = me.v
+				c.braking = true
+				for k in 5:
+					c.braking = true
+					await get_tree().process_frame
+				get_viewport().get_texture().get_image().save_png("%s_%s.png" % [out, kind])
+				c.s = me.s + 4000.0
+				break
+		i += 1
+	# a queue stopping behind a stopped bike, seen from the side
+	var behind: Array = []
+	for c in sim.cars:
+		if c.dir > 0:
+			behind.append(c)
+		if behind.size() == 2:
+			break
+	me.v = 0.0
+	race_view.debug_close = true
+	for j in behind.size():
+		behind[j].d = me.d
+		behind[j].s = me.s - 4.0 - behind[j].len * 0.5 - j * 8.0
+		behind[j].v = 0.0
+		behind[j].braking = true
+	for k in 5:
+		await get_tree().process_frame
+	get_viewport().get_texture().get_image().save_png("%s_queue.png" % out)
 	get_tree().quit()

@@ -62,5 +62,12 @@
    "Escape",
    "KeyP"
   ]
+ },
+ "traffic": {
+  "max_kmh": {
+   "sedan": 90,
+   "van": 80,
+   "truck": 70
+  }
  }
 }

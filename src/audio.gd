@@ -171,6 +171,10 @@ func handle_event(e: Array) -> void:
 					siren.play()
 			else:
 				siren.stop()
+		"scrape":
+			play("baton", -8.0, 0.6)
+		"bump":
+			play("kick", -5.0, 0.8)
 		"denied":
 			play("beep", -12.0, 0.4)
 

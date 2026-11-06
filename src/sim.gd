@@ -25,6 +25,7 @@ class Rider:
 	var v := 0.0
 	var vx := 0.0
 	var psi := 0.0        # heading against the road, radians
+	var lat := 0.0        # sideways speed right now, m/s
 	var lean := 0.0       # radians, + right
 	var a_lat := 0.0
 	var sv := 0.0         # steering smoothed
@@ -91,6 +92,7 @@ class Rider:
 	var dead := false
 	var bustable := false
 	var last_hit := -99.0
+	var scrape_t := -99.0
 	var last_side := 1
 	var fall_kmh := 0.0
 	var bot_lane := 1.8
@@ -99,13 +101,25 @@ class Rider:
 class Car:
 	var s := 0.0
 	var d := 0.0
-	var v := 0.0
+	var v := 0.0        # signed: + travels with us, - oncoming
+	var dir := 1
+	var v0 := 10.0      # the speed this driver wants, never above the limit for its type
 	var hw := 0.95
 	var len := 4.4
 	var kind := "sedan"
 	var color := Color.WHITE
+	var lead: Variant = null
+	var braking := false
 
 const CAR_DEF := {"sedan": [0.95, 4.4], "van": [1.05, 5.2], "truck": [1.3, 8.0]}
+# how drivers keep their distance (Intelligent Driver Model, a standard traffic formula)
+const CAR_A := 2.4         # gentle acceleration, m/s2
+const CAR_B := 4.0         # comfortable braking, m/s2
+const CAR_BRAKE_MAX := 11.0
+const CAR_T := 0.9         # seconds of headway
+const CAR_S0 := 3.0        # metres left to whatever it stopped behind
+const CAR_LOOK := 170.0
+const CAR_AB2 := 6.197     # 2 * sqrt(A * B)
 const CAR_COLS := ["#c0392b", "#2f6fb0", "#d8d8d8", "#3a3a42", "#b08a2e", "#3f7a55", "#6f4aa8"]
 
 var road: Road
@@ -116,6 +130,7 @@ var me: Rider
 var foes: Array[Rider] = []
 var cops: Array[Rider] = []
 var cars: Array[Car] = []
+var riders: Array[Rider] = []
 var phase := "count"
 var t := 0.0
 var count := 3.0
@@ -237,6 +252,9 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 		foes.append(c2)
 		cops.append(c2)
 		cop_i += 1
+	riders.append(me)
+	for f2 in foes:
+		riders.append(f2)
 	_make_cars()
 
 func _make_cars() -> void:
@@ -244,15 +262,19 @@ func _make_cars() -> void:
 	r2.seed = int(tr.seed) + 1
 	var types := ["sedan", "sedan", "van", "sedan", "truck"]
 	var zspan := road.finish_s - road.start_s
-	var add := func(ln: int, sp: float, s0: float) -> void:
+	var limits: Dictionary = D.rules.traffic.max_kmh
+	var add := func(ln: int, share: float, e: float) -> void:
 		var c := Car.new()
 		c.kind = types[r2.randi() % types.size()]
 		c.hw = CAR_DEF[c.kind][0]
 		c.len = CAR_DEF[c.kind][1]
 		c.color = Color(CAR_COLS[r2.randi() % CAR_COLS.size()])
 		c.d = LANES[ln]
-		c.v = sp
-		c.s = s0
+		c.dir = 1 if ln >= 2 else -1
+		c.v0 = min(share * v_top, float(limits[c.kind]) / 3.6)
+		c.v = c.dir * c.v0
+		# spread so that a rider at league speed meets them evenly through the race
+		c.s = road.start_s + zspan * e * (1.0 - c.dir * c.v0 / (v_top * 0.9))
 		cars.append(c)
 	var prev := -1
 	for k in int(tr.cars):
@@ -261,14 +283,159 @@ func _make_cars() -> void:
 			ln = 5 - ln
 		prev = ln
 		var e: float = lerp(0.07, 0.96, float(k) / tr.cars) + r2.randf() * 0.015
-		var sp: float = (0.5 if ln == 2 else 0.38) * v_top
-		add.call(ln, sp, road.start_s + zspan * e * (1.0 - sp / (v_top * 0.9)))
+		add.call(ln, 0.5 if ln == 2 else 0.38, e)
 	var on := int(round(tr.cars * 0.8))
 	for k in on:
 		var ln := 1 if r2.randf() < 0.55 else 0
 		var e: float = lerp(0.05, 0.98, float(k) / on) + r2.randf() * 0.02
-		var sp: float = (0.5 if ln == 1 else 0.42) * v_top
-		add.call(ln, -sp, road.start_s + zspan * e * (1.0 + sp / (v_top * 0.9)))
+		add.call(ln, 0.5 if ln == 1 else 0.42, e)
+	link_cars()
+
+# each car follows the next one ahead in its lane; they start spaced out and never swap order
+func link_cars() -> void:
+	for lane in LANES:
+		var list: Array[Car] = []
+		for c in cars:
+			if is_equal_approx(c.d, lane):
+				list.append(c)
+		list.sort_custom(func(a: Car, b: Car) -> bool: return a.dir * a.s > b.dir * b.s)
+		for i in list.size():
+			var c: Car = list[i]
+			c.lead = null
+			if i > 0:
+				var l: Car = list[i - 1]
+				c.lead = l
+				var room: float = (l.len + c.len) * 0.5 + 12.0
+				if c.dir * (l.s - c.s) < room:
+					c.s = l.s - c.dir * room
+
+func _update_car(c: Car, dt: float) -> void:
+	if c.dir > 0 and c.s >= road.length - 30.0:
+		c.v = 0.0
+		c.braking = false
+		return
+	if c.dir < 0 and c.s < -100.0:
+		return
+	var speed: float = abs(c.v)
+	var gap := 1e9
+	var obs_v := 0.0
+	if c.lead != null:
+		var l: Car = c.lead
+		gap = c.dir * (l.s - c.s) - (l.len + c.len) * 0.5
+		obs_v = abs(l.v)
+	var reach: float = c.hw + 1.0
+	for r in riders:
+		if r.state == WAIT or r.state == GONE:
+			continue
+		var fallen: bool = r.state == DOWN
+		var rv: float = r.v
+		if c.dir < 0:
+			# oncoming drivers only stop for someone lying or standing in their lane; riding at them stays deadly
+			if not fallen and r.v > 4.0:
+				continue
+			rv = 0.0
+		if abs(r.d - c.d) < reach or abs(r.d + r.lat * 0.35 - c.d) < reach:
+			var g: float = c.dir * (r.s - c.s) - c.len * 0.5 - 1.0
+			if g > -1.5 and g < CAR_LOOK and g < gap:
+				gap = g
+				obs_v = rv
+		if fallen and abs(r.fly_d - c.d) < reach:
+			var g2: float = c.dir * (r.fly_s - c.s) - c.len * 0.5 - 0.6
+			if g2 > -1.5 and g2 < CAR_LOOK and g2 < gap:
+				gap = g2
+				obs_v = max(0.0, r.fly_v) if c.dir > 0 else 0.0
+	var ratio: float = speed / c.v0
+	var free: float = ratio * ratio * ratio * ratio
+	var a: float
+	if gap < 1e8:
+		var s_star: float = max(CAR_S0, CAR_S0 + speed * CAR_T + speed * (speed - obs_v) / CAR_AB2)
+		var q: float = s_star / max(gap, 0.1)
+		a = CAR_A * (1.0 - free - q * q)
+	else:
+		a = CAR_A * (1.0 - free)
+	a = max(a, -CAR_BRAKE_MAX)
+	speed = max(0.0, speed + a * dt)
+	c.braking = a < -1.2
+	c.v = c.dir * speed
+	c.s += c.v * dt
+	if c.lead != null:
+		var l2: Car = c.lead
+		var touch: float = (l2.len + c.len) * 0.5 + 0.5
+		if c.dir * (l2.s - c.s) < touch:
+			c.s = l2.s - c.dir * touch
+			c.v = c.dir * min(speed, abs(l2.v))
+
+# Getting back on the bike: never inside a car, whichever lane has room
+func _safe_spawn(r: Rider) -> void:
+	for lane in [r.d, 1.8, 5.4]:
+		var clear := true
+		for c in cars:
+			if c.dir > 0 and abs(c.s - r.s) < c.len * 0.5 + 4.0 and abs(c.d - lane) < c.hw + 0.6:
+				clear = false
+				break
+		if clear:
+			r.d = lane
+			return
+	var ahead: float = r.s
+	for c in cars:
+		if c.dir > 0 and abs(c.s - r.s) < c.len * 0.5 + 4.0:
+			ahead = max(ahead, c.s + c.len * 0.5 + 4.0)
+	r.s = ahead
+
+# Touching traffic. Told apart by where the contact happened, and nobody ever stays inside a car.
+func _car_contact(dt: float) -> void:
+	var m := me
+	for c in cars:
+		var halfs: float = c.len * 0.5 + 1.0
+		var dd: float = c.s - m.s
+		if abs(dd) >= halfs:
+			continue
+		var halfw: float = c.hw + 0.4
+		var dw: float = c.d - m.d
+		if abs(dw) >= halfw:
+			continue
+		var kmh: float = m.v * 3.6
+		if c.dir < 0:
+			m.s = min(m.s, c.s - halfs)
+			m.v = 0.0
+			crash("head", kmh + min(60.0, abs(c.v) * 3.6))
+			return
+		var rel: float = m.v - c.v
+		var from_end: bool = halfs - abs(dd) <= abs(rel) * dt * 1.6 + 0.08
+		if from_end and dd > 0.0 and rel > 0.0:
+			# rode into its tail
+			m.s = c.s - halfs
+			m.v = max(0.0, c.v) * 0.4
+			crash("car", kmh)
+			return
+		if from_end and dd <= 0.0 and rel <= 0.0:
+			# cut in so close it could not stop: it shoves you, and hard if it was going much faster
+			c.s = m.s - halfs
+			c.v = m.v
+			if -rel > 8.0:
+				crash("rear", -rel * 3.6)
+				return
+			m.v = min(m.top, m.v - rel * 0.5)
+			ev("bump")
+			continue
+		if abs(rel) > 12.0:
+			if dd <= 0.0 and rel < 0.0:
+				# swerved right into the path of a much faster car
+				c.s = m.s - halfs
+				c.v = m.v
+				crash("rear", -rel * 3.6)
+				return
+			m.v = max(0.0, c.v) * 0.4
+			crash("car", kmh)
+			return
+		# rubbing along its side: slide off, a scratch rather than a crash
+		var side: float = -1.0 if dw > 0.0 else 1.0
+		m.d = c.d + side * halfw
+		m.push = side * 3.0
+		if t - m.scrape_t > 0.5:
+			m.scrape_t = t
+			m.bike_hp = max(1.0, m.bike_hp - 2.0)
+			ev("scrape")
 
 # ---------- combat ----------
 func weapon_def(w: String) -> Dictionary:
@@ -453,7 +620,7 @@ func crash(why: String, kmh_at := -1.0) -> void:
 	me.attack = null
 	me.falls += 1
 	me.bike_rot = 0.0
-	var loss := {"head": 45.0, "car": 30.0, "pole": 25.0, "off": 18.0}.get(why, 12.0) as float
+	var loss := {"head": 45.0, "car": 30.0, "pole": 25.0, "rear": 20.0, "off": 18.0}.get(why, 12.0) as float
 	me.bike_hp = max(0.0, me.bike_hp - loss)
 	var inj: float = kmh * D.rules.fall_k * (1.0 - me.prot)
 	if why == "knock":
@@ -472,6 +639,8 @@ func crash(why: String, kmh_at := -1.0) -> void:
 		show_banner("Вылетел с дороги", true)
 	elif why == "head":
 		show_banner("Лоб в лоб", true)
+	elif why == "rear":
+		show_banner("Въехали сзади", true)
 	elif why != "knock":
 		show_banner("Авария", true)
 	else:
@@ -581,8 +750,8 @@ func _bot_input() -> void:
 			for c in cars:
 				var e: float = c.s - me.s
 				var closing: float = max(0.0, me.v - c.v)
-				if c.v > 0.0 and e > 0.0 and e < closing * closing / 18.0 + 18.0 and abs(c.d - me.d) < 2.2:
-					me.bot_block = c.v * 0.95
+				if c.dir > 0 and e > 0.0 and e < closing * closing / 18.0 + 18.0 and abs(c.d - me.d) < 2.2:
+					me.bot_block = max(0.05, c.v * 0.95)
 					break
 	elif tx < 0.0 and _lane_clear(1.8, 15.0):
 		tx = 1.8
@@ -635,7 +804,8 @@ func _update_me(dt: float) -> void:
 		m.slide = abs(pull) > auth * 0.82 and m.v > top * 0.3
 		var bars: float = m.sv * auth * (0.68 if over else (0.88 if m.slide else 1.0))
 		var lateral: float = bars - pull
-		m.d += (lateral + m.push) * dt
+		m.lat = lateral + m.push
+		m.d += m.lat * dt
 		m.push *= exp(-5.0 * dt)
 		# what you see: the bike points where it is really going and leans for the turn it is actually making
 		var want_psi: float = atan2(lateral + m.push, max(4.0, m.v))
@@ -665,15 +835,7 @@ func _update_me(dt: float) -> void:
 			ev("dust")
 		m.v = clamp(m.v, 0.0, top)
 		if phase == "race" and m.inv <= 0.0:
-			for c in cars:
-				var dd: float = c.s - m.s
-				if abs(dd) < c.len * 0.5 + 1.0 and abs(c.d - m.d) < c.hw + 0.4 and (m.v > c.v * 0.9 or c.v < 0.0):
-					var kmh: float = m.v * 3.6
-					var head: bool = c.v < 0.0
-					m.s = min(m.s, c.s - (c.len * 0.5 + 1.0) * (1.0 if not head else 1.0))
-					m.v = max(0.0, c.v) * 0.4
-					crash("head" if head else "car", (kmh + 60.0) if head else kmh)
-					break
+			_car_contact(dt)
 			if m.state == RIDE:
 				if off and pct > 0.62 and m.v * 3.6 > 110.0:
 					m.off_t += dt
@@ -723,6 +885,7 @@ func _update_me(dt: float) -> void:
 				m.state = RIDE
 				m.d = clamp(m.fly_d, 1.8, 5.4) if abs(m.fly_d) > 0.0 else 1.8
 				m.s = max(m.s, m.fly_s - 2.0)
+				_safe_spawn(m)
 				m.off_t = 0.0
 				m.v = 0.0
 				m.hp = max(m.hp, 15.0)
@@ -786,6 +949,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 			f.v = 0.0
 			f.d = clamp(f.fly_d, 1.5, 5.8)
 			f.s = max(f.s, f.fly_s - 2.0)
+			_safe_spawn(f)
 			f.inv = 1.5
 			f.push = 0.0
 			f.vx = 0.0
@@ -864,7 +1028,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 		var dd: float = c.s - f.s
 		if dd > 0.0 and dd < (16.0 + (f.v - c.v) * 0.9) * (0.5 if sty == "maniac" else 1.0) and abs(c.d - f.d) < 2.3:
 			var nx: float = c.d + (-3.6 if f.d <= c.d else 3.6)
-			if abs(nx) > 6.6 or (nx < 0.0 and c.v > 0.0 and rng.randf() < 0.02):
+			if abs(nx) > 6.6 or (nx < 0.0 and c.dir > 0 and rng.randf() < 0.02):
 				nx = c.d + (3.6 if f.d <= c.d else -3.6)
 			tx = nx
 			break
@@ -873,7 +1037,8 @@ func _update_foe(f: Rider, dt: float) -> void:
 	var lat_max: float = max(1.5, f.v * 0.45)
 	var want: float = clamp(clamp(tx - f.d, -7.2, 7.2) * 2.0 * (0.72 + 0.006 * f.hand), -lat_max, lat_max)
 	f.vx += (want - f.vx) * min(1.0, dt * 5.0)
-	f.d = clamp(f.d + (f.vx + f.push) * dt, -12.4, 12.4)
+	f.lat = f.vx + f.push
+	f.d = clamp(f.d + f.lat * dt, -12.4, 12.4)
 	f.push *= exp(-3.0 * dt)
 	f.s += f.v * dt
 	var k: float = road.kappa_at(f.s)
@@ -886,7 +1051,15 @@ func _update_foe(f: Rider, dt: float) -> void:
 	if f.inv <= 0.0:
 		for c in cars:
 			var dd2: float = c.s - f.s
-			if abs(dd2) < c.len * 0.5 + 1.0 and abs(c.d - f.d) < c.hw + 0.35 and f.v > c.v:
+			if abs(dd2) < c.len * 0.5 + 1.0 and abs(c.d - f.d) < c.hw + 0.35:
+				if c.dir > 0 and f.v <= c.v:
+					# the car caught up: it waits behind, or the rival slides off its side
+					if dd2 < 0.0:
+						c.s = f.s - (c.len * 0.5 + 1.0)
+						c.v = f.v
+					else:
+						f.d = c.d + (1.0 if f.d >= c.d else -1.0) * (c.hw + 0.35)
+					continue
 				if can_crash:
 					ko_foe(f, 1 if f.d >= c.d else -1, false, "car")
 					f.v = max(0.0, c.v) * 0.5
@@ -955,8 +1128,7 @@ func step(dt: float) -> void:
 	for f in foes:
 		_update_foe(f, dt)
 	for c in cars:
-		if c.v < 0.0 or c.s < road.length - 30.0:
-			c.s += c.v * dt
+		_update_car(c, dt)
 	if phase == "finish":
 		end_t -= dt
 		if end_t <= 0.0:

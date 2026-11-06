@@ -7,6 +7,8 @@ var cam: Camera3D
 var views: Array[BikeView] = []
 var me_view: BikeView
 var car_nodes: Array[MeshInstance3D] = []
+var brake_nodes: Array[Node3D] = []
+var brake_box: BoxMesh
 var sparks: CPUParticles3D
 var smoke: CPUParticles3D
 var dust: CPUParticles3D
@@ -66,8 +68,8 @@ func build(s: Sim) -> void:
 		_add_bike(f)
 	await get_tree().process_frame
 	_build_cars(theme)
-	sparks = _particles(Color(1.0, 0.75, 0.25), 0.1, 0.45, 26, 70.0, Vector2(3, 11), -9.0)
-	impact = _particles(Color(1.0, 0.9, 0.5), 0.14, 0.28, 14, 90.0, Vector2(2, 7), -3.0)
+	sparks = _particles(Color(1.0, 0.75, 0.25), 0.06, 0.45, 26, 70.0, Vector2(3, 11), -9.0)
+	impact = _particles(Color(1.0, 0.9, 0.5), 0.09, 0.28, 14, 90.0, Vector2(2, 7), -3.0)
 	smoke = _particles(Color(0.8, 0.8, 0.85, 1.0), 0.5, 0.5, 6, 40.0, Vector2(0.5, 2), 1.0)
 	dust = _particles(Color(theme.grass[0]).lightened(0.2), 0.32, 0.4, 7, 60.0, Vector2(1, 4), -6.0)
 	world.update_visibility(s.me.s, draw_dist)
@@ -100,6 +102,27 @@ func _build_cars(theme: Dictionary) -> void:
 		mi.visible = false
 		add_child(mi)
 		car_nodes.append(mi)
+		# brake lights: drawn only while the driver is braking
+		var lights := Node3D.new()
+		lights.visible = false
+		var p: Array = {"sedan": [0.55, 0.72, 2.23], "van": [0.84, 1.02, 2.63], "truck": [1.0, 0.85, 3.96]}[c.kind]
+		for side in [-1.0, 1.0]:
+			var q := MeshInstance3D.new()
+			q.mesh = _brake_mesh()
+			q.position = Vector3(side * p[0], p[1], p[2])
+			lights.add_child(q)
+		mi.add_child(lights)
+		brake_nodes.append(lights)
+
+func _brake_mesh() -> BoxMesh:
+	if brake_box == null:
+		brake_box = BoxMesh.new()
+		brake_box.size = Vector3(0.42, 0.2, 0.04)
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = Color(1.0, 0.08, 0.05)
+		brake_box.material = m
+	return brake_box
 
 func _fx(p: CPUParticles3D, at: Vector3) -> void:
 	p.global_position = at
@@ -120,6 +143,11 @@ func handle_event(e: Array) -> void:
 			shake = 0.42
 		"hurt":
 			shake = max(shake, 0.16)
+		"scrape":
+			_fx(sparks, sim.road.world(sim.me.s, sim.me.d, 0.5))
+			shake = max(shake, 0.12)
+		"bump":
+			shake = max(shake, 0.1)
 		"dust":
 			if Engine.get_process_frames() % 6 == 0:
 				_fx(dust, sim.road.world(sim.me.s, sim.me.d, 0.1))
@@ -140,9 +168,10 @@ func _process(delta: float) -> void:
 		if vis:
 			var p := sim.road.world(c.s, c.d)
 			var f := sim.road.fwd_at(c.s)
-			if c.v < 0.0:
+			if c.dir < 0:
 				f = -f
 			node.global_transform = Transform3D(Basis.looking_at(f, Vector3.UP), p)
+			brake_nodes[i].visible = c.braking
 	# slide smoke
 	if me.state == Sim.RIDE and me.slide and Engine.get_process_frames() % 5 == 0:
 		_fx(smoke, sim.road.world(me.s - 0.6, me.d, 0.1))
