@@ -83,27 +83,62 @@ for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS http://127.0.0.1:8787/gaz-api/ping >
 curl -fsS http://127.0.0.1:8787/gaz-api/ping >/dev/null || { echo "Служба не отвечает:"; journalctl -u gaz-api -n 20 --no-pager; exit 1; }
 
 say "Caddy"
-if grep -q 'gaz-api' "$CF"; then
+# the site may be written in several ways, or sit in a file of its own that the main Caddyfile imports
+if grep -rqs 'gaz-api' /etc/caddy; then
   echo "Уже настроен"
 else
-  cp "$CF" "$CF.bak-gaz-api"
-  python3 - "$CF" "$SITE" <<'PY'
+  FILES=$( { echo "$CF"; grep -rlsF "$SITE" /etc/caddy 2>/dev/null; } | awk '!seen[$0]++')
+  PATCHED=""
+  for F in $FILES; do
+    [ -f "$F" ] || continue
+    cp "$F" "$F.bak-gaz-api"
+    if python3 - "$F" "$SITE" <<'PY'
 import re, sys
 path, site = sys.argv[1], sys.argv[2]
 lines = open(path).read().split("\n")
 for i, l in enumerate(lines):
-    if site in l and l.rstrip().endswith("{") and not l.lstrip().startswith("#"):
-        ind = re.match(r"\s*", lines[i + 1] if i + 1 < len(lines) else "").group(0) or "    "
-        lines.insert(i + 1, ind + "reverse_proxy /gaz-api/* 127.0.0.1:8787")
-        open(path, "w").write("\n".join(lines))
-        sys.exit(0)
-print("Не нашёл блок сайта " + site + " в " + path)
+    code = l.split("#")[0]
+    if site not in code:
+        continue
+    # "site {"  or  "site" with the brace on the next line, also with other addresses or a scheme around it
+    j = None
+    if code.rstrip().endswith("{"):
+        j = i
+    else:
+        k = i + 1
+        while k < len(lines) and not lines[k].strip():
+            k += 1
+        if k < len(lines) and lines[k].strip() == "{":
+            j = k
+    if j is None:
+        continue
+    nxt = lines[j + 1] if j + 1 < len(lines) else ""
+    ind = re.match(r"\s*", nxt).group(0) or "    "
+    lines.insert(j + 1, ind + "reverse_proxy /gaz-api/* 127.0.0.1:8787")
+    open(path, "w").write("\n".join(lines))
+    sys.exit(0)
 sys.exit(1)
 PY
-  if ! caddy validate --config "$CF" --adapter caddyfile >/dev/null 2>&1; then
-    cp "$CF.bak-gaz-api" "$CF"
-    echo "Caddy не принял настройку, вернул как было"; exit 1
+    then
+      PATCHED="$F"; break
+    else
+      rm -f "$F.bak-gaz-api"
+    fi
+  done
+  if [ -z "$PATCHED" ]; then
+    echo "Не нашёл, где Caddy описывает $SITE. Сфотографируй это Claude:"
+    echo "--- $CF"; cat "$CF"
+    echo "--- /etc/caddy"; ls -la /etc/caddy
+    echo "--- кто слушает 80 и 443"; ss -ltnp 2>/dev/null | grep -E ':(80|443) ' || true
+    exit 1
   fi
+  if ! caddy validate --config "$CF" --adapter caddyfile >/dev/null 2>&1; then
+    cp "$PATCHED.bak-gaz-api" "$PATCHED"
+    echo "Caddy не принял настройку, вернул как было:"
+    caddy validate --config "$CF" --adapter caddyfile 2>&1 | tail -5
+    exit 1
+  fi
+  echo "Добавил строку в $PATCHED"
   systemctl reload caddy
 fi
 
