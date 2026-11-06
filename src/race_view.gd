@@ -154,7 +154,7 @@ func _update_camera(delta: float) -> void:
 	var falling := me.state == Sim.DOWN
 	var focus_s: float = me.fly_s if falling else me.s
 	var focus_d: float = me.fly_d if falling else me.d
-	cam_d += (focus_d * 0.82 - cam_d) * min(1.0, delta * 6.0)
+	cam_d += (focus_d * 0.82 - cam_d) * min(1.0, delta * 8.0)
 	var want_dist: float = lerp(3.9, 5.0, pct) + (1.8 if falling else 0.0)
 	cam_dist += (want_dist - cam_dist) * min(1.0, delta * 2.5)
 	var back: float = focus_s - cam_dist

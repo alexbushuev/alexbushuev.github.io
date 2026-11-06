@@ -64,11 +64,19 @@ func stats_of(b: Dictionary, u: Dictionary) -> Dictionary:
 	}
 
 # Real units from here on: metres, seconds. grip and handling turn into lateral acceleration.
-func a_grip(grip: float) -> float:
-	return 6.5 + 0.075 * grip
+func grip_f(grip: float) -> float:
+	return 1.35 - 0.0075 * grip
 
-func a_brake(grip: float) -> float:
-	return 9.0 + 0.05 * grip
+func steer_k(hand: float) -> float:
+	return 0.72 + 0.006 * hand
+
+# fastest steady cornering, m/s2. Same limit as cornerLimit() in the 2D game, in real units
+func a_grip(grip: float, hand: float) -> float:
+	return 8.69 * steer_k(hand) / grip_f(grip)
+
+# strong arcade brakes that grow with top speed, like the 2D game
+func a_brake(grip: float, top: float) -> float:
+	return max(9.0 + 0.05 * grip, top * 0.45)
 
 func rider_stats(b: Dictionary, u: Dictionary, ts: int, th: int, glove := 0, boot := 0, weapon := "none") -> Dictionary:
 	var s := stats_of(b, u)
@@ -78,8 +86,8 @@ func rider_stats(b: Dictionary, u: Dictionary, ts: int, th: int, glove := 0, boo
 	return {
 		"gears": int(c.gears), "shift": c.shift, "cyl": int(c.cyl), "idle": c.idle, "red": c.red,
 		"kmh": kmh, "top": kmh / 3.6, "accel": s.acc * (1.0 - weight_loss(fx.kg, s.hp)),
-		"a_grip": a_grip(s.grip), "a_brake": a_brake(s.grip), "off": 1.2 - 0.006 * s.grip,
-		"steer": 0.72 + 0.006 * s.hand, "dur": s.dur, "prot": fx.prot, "no_hand": fx.no_hand, "hit_k": fx.hit,
+		"a_grip": a_grip(s.grip, s.hand), "a_brake": a_brake(s.grip, kmh / 3.6), "off": 1.2 - 0.006 * s.grip,
+		"grip_f": grip_f(s.grip), "steer": steer_k(s.hand), "dur": s.dur, "prot": fx.prot, "no_hand": fx.no_hand, "hit_k": fx.hit,
 		"cd_k": fx.cd_k, "reach_k": fx.reach_k, "fist": max(1, round((10 + 3 * glove) * fx.hit)),
 		"kick": max(1, round((9 + 3 * boot) * fx.kick)), "push": 1.0 + 0.15 * boot,
 		"weapon": "none" if fx.no_hand else weapon,

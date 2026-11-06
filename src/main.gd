@@ -2,6 +2,7 @@ extends Node
 # Screens: menu -> choose bike -> race -> result. Test build: no money or garage yet, those move over next.
 
 const STEP := 1.0 / 60.0
+const BUILD_NO := 2
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -145,7 +146,7 @@ func _show_menu() -> void:
 	var v := _page()
 	var head := HBoxContainer.new()
 	head.add_child(_label("ГАЗ И ЦЕПЬ", font_big, 46, Color("#ffc81f")))
-	var tag := _label("  3D · ранняя сборка", font_small, 18, Color("#a9a7b4"))
+	var tag := _label("  3D · сборка %d" % BUILD_NO, font_small, 18, Color("#a9a7b4"))
 	head.add_child(tag)
 	v.add_child(head)
 	var grid := GridContainer.new()

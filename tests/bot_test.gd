@@ -38,9 +38,21 @@ func _race(d: Node, ti: int, bid: String, seed_v: int, peace: bool) -> void:
 	var why: Dictionary = {}
 	while sim.phase != "over" and sim.t < 400.0:
 		sim.step(dt)
+		if OS.get_cmdline_user_args().has("trace2") and sim.phase == "race" and sim.t > 16.0 and sim.t < 20.0 and int(sim.t * 60.0) % 12 == 0:
+			var nc: Sim.Car = null
+			for c in sim.cars:
+				if c.s > sim.me.s and (nc == null or c.s < nc.s) and c.v > 0.0:
+					nc = c
+			print("  t=%.1f s=%.0f d=%.2f lane=%.1f steer=%.2f sv=%.2f pull=%.1f auth=%.1f v=%.0f | next car ds=%.0f d=%.1f" % [sim.t, sim.me.s, sim.me.d, sim.me.bot_lane, sim.inp.steer, sim.me.sv, sim.bend_pull(sim.me, sim.me.s), sim.steer_auth(sim.me), sim.me.v * 3.6, nc.s - sim.me.s, nc.d])
 		for e in sim.events:
 			if e[0] == "crash":
 				why[e[1]] = why.get(e[1], 0) + 1
+				if OS.get_cmdline_user_args().has("trace"):
+					var best: Sim.Car = null
+					for c in sim.cars:
+						if best == null or abs(c.s - sim.me.s) + abs(c.d - sim.me.d) * 3.0 < abs(best.s - sim.me.s) + abs(best.d - sim.me.d) * 3.0:
+							best = c
+					print("  crash t=%.1f %s me s=%.0f d=%.2f lane=%.1f v=%.0f block=%.0f k=%.4f | car ds=%.1f d=%.1f v=%.0f %s" % [sim.t, e[1], sim.me.s, sim.me.d, sim.me.bot_lane, sim.me.fall_kmh, sim.me.bot_block * 3.6, sim.road.kappa_at(sim.me.s), best.s - sim.me.s, best.d, best.v * 3.6, best.kind])
 		sim.events.clear()
 		if sim.phase == "race":
 			maxv = max(maxv, sim.me.v)

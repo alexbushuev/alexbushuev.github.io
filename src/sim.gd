@@ -12,8 +12,7 @@ const REACH_M := 4.7      # 2D reach numbers to metres
 const Z_REACH := 3.0
 const BUST_M := 50.0
 const G := 9.81
-const ASSIST := 0.8       # how much of a bend the bike follows by itself; the rest is on the rider
-const K_ALIGN := 2.2
+const STEER_F := 0.75     # steering and bend pull, relative to the 2D game. Only their ratio sets how fast a bend can be taken
 const LANES := [-5.4, -1.8, 1.8, 5.4]
 const MY_LANES := [1.8, 5.4]
 
@@ -199,8 +198,8 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 		f.bike = rb
 		f.top = (rb.kmh * (1.0 - D.aero_loss(fx.aero, rb.kmh))) / 3.6
 		f.acc = rb.acc * (1.0 - D.weight_loss(fx.kg, rb.hp))
-		f.a_grip = D.a_grip(rb.grip)
-		f.a_brake = D.a_brake(rb.grip)
+		f.a_grip = D.a_grip(rb.grip, rb.hand)
+		f.a_brake = D.a_brake(rb.grip, f.top)
 		f.hand = rb.hand
 		f.dur = rb.dur
 		f.prot = fx.prot
@@ -228,7 +227,7 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 		c2.top = v_top
 		c2.acc = 0.3
 		c2.a_grip = 13.0
-		c2.a_brake = 14.0
+		c2.a_brake = D.a_brake(70.0, v_top)
 		c2.weapon = "baton"
 		c2.cd = 1.0
 		c2.dur = 999.0
@@ -518,6 +517,16 @@ func corner_limit(s: float, v: float, a_grip: float, a_brake: float, margin := 0
 	return lim
 
 # ---------- player ----------
+# Same steering model as the 2D game, in metres per second across the road:
+# the bars give a sideways speed, a bend pulls you to its outside with the square of your speed.
+func steer_auth(m: Rider) -> float:
+	var pct: float = m.v / m.top
+	var auth: float = 2.5 * m.st.steer * (0.4 + 0.6 * min(1.0, pct * 1.4)) * (1.0 - 0.25 * pct) * X2M * STEER_F
+	return min(auth, m.v * 0.75)
+
+func bend_pull(m: Rider, s: float) -> float:
+	return road.kappa_at(s) * m.v * m.v * 1.487 * m.st.grip_f * STEER_F
+
 func gear_span(k: int) -> float:
 	return pow(float(k + 1) / me.gears, 0.72) * (1.06 if k == me.gears - 1 else 1.0)
 
@@ -546,6 +555,16 @@ func _lane_clear(lane: float, within_extra: float) -> bool:
 			return false
 	return true
 
+# nothing alongside between here and that lane
+func _path_clear(lane: float) -> bool:
+	var lo: float = min(me.d, lane)
+	var hi: float = max(me.d, lane)
+	for o in cars:
+		var e: float = o.s - me.s
+		if e > -o.len and e < 7.0 + max(0.0, me.v - o.v) * 0.7 and o.d + o.hw + 0.5 > lo and o.d - o.hw - 0.5 < hi and abs(o.d - me.d) > 0.3:
+			return false
+	return true
+
 func _bot_input() -> void:
 	var lim := corner_limit(me.s, me.v, me.a_grip, me.a_brake, 0.9)
 	var tx := me.bot_lane
@@ -553,7 +572,7 @@ func _bot_input() -> void:
 	if not _lane_clear(tx, 0.0):
 		var free: Array = []
 		for v2 in [1.8, 5.4, -1.8, -5.4]:
-			if _lane_clear(v2, 8.0):
+			if _lane_clear(v2, 8.0) and _path_clear(v2):
 				free.append(v2)
 		if free.size() > 0:
 			free.sort_custom(func(a: float, b: float) -> bool: return abs(a - me.d) + (6.0 if a < 0.0 else 0.0) < abs(b - me.d) + (6.0 if b < 0.0 else 0.0))
@@ -568,13 +587,7 @@ func _bot_input() -> void:
 	elif tx < 0.0 and _lane_clear(1.8, 15.0):
 		tx = 1.8
 	me.bot_lane = tx
-	# lateral error sets a heading, heading error sets the bars
-	var v: float = max(4.0, me.v)
-	var lat: float = clamp((tx - me.d) * 2.2, -9.0, 9.0)
-	var want_psi: float = asin(clamp(lat / v, -0.5, 0.5))
-	var a_req: float = v * v * road.kappa_at(me.s)
-	var a_need: float = 6.0 * (want_psi - me.psi) * v + K_ALIGN * me.psi * v + (1.0 - ASSIST) * a_req
-	inp.steer = clamp(a_need / max(1.0, me.a_grip * clamp(me.st.steer, 0.6, 1.3) * 0.8), -1.0, 1.0)
+	inp.steer = clamp((tx - me.d) * 0.55 + bend_pull(me, me.s) / max(1.0, steer_auth(me)), -1.0, 1.0)
 	if bot_human:
 		_hum_t -= 1.0 / 60.0
 		if _hum_t <= 0.0:
@@ -612,30 +625,29 @@ func _update_me(dt: float) -> void:
 		var steer: float = inp.steer
 		var brk: bool = inp.brake and not stopping
 		var gas: bool = inp.gas and not brk and not stopping
+		var pull: float = bend_pull(m, m.s)
+		var auth: float = steer_auth(m)
 		if stopping:
-			steer = clamp(-m.psi * 4.0 + (clamp(m.d, 1.8, 5.4) - m.d) * 0.1, -1.0, 1.0)
-		var hand_k: float = m.st.steer
-		m.sv += (steer - m.sv) * min(1.0, dt * 7.0 * hand_k)
-		var v: float = max(m.v, 2.0)
+			steer = clamp((clamp(m.d, 1.8, 5.4) - m.d) * 0.55 + pull / max(1.0, auth), -1.0, 1.0)
+		m.sv += (steer - m.sv) * min(1.0, dt * 12.0)
 		var off: bool = abs(m.d) > Road.EDGE
-		var a_max: float = m.a_grip * (0.65 if off else 1.0) * (0.85 if brk else 1.0)
-		var a_req: float = v * v * k_road
-		# the lean a rider holds: follows the bend, straightens the bike, plus what the bars ask for
-		var a_auto: float = clamp(ASSIST * a_req, -a_max, a_max) - K_ALIGN * m.psi * v
-		var a_steer: float = a_max * clamp(hand_k, 0.6, 1.3) * 0.8
-		var a_t: float = a_auto + m.sv * a_steer
-		a_t = clamp(a_t, -a_max, a_max)
-		m.a_lat += (a_t - m.a_lat) * min(1.0, dt * 9.0 * hand_k)
-		m.lean = atan2(m.a_lat, G) * clamp(m.v / 8.0, 0.0, 1.0)
-		m.slide = abs(a_req) > a_max * 0.92 and m.v > top * 0.3
-		var kb: float = m.a_lat / (v * v)
-		kb = clamp(kb, -0.25, 0.25)
-		var ds: float = m.v * cos(m.psi) / max(0.3, 1.0 - k_road * m.d)
-		m.psi += (m.v * kb - k_road * ds) * dt
-		m.psi = clamp(m.psi, -0.9, 0.9)
-		m.d += (m.v * sin(m.psi) + m.push) * dt
+		var over: bool = abs(pull) > auth * 1.15
+		m.slide = abs(pull) > auth * 0.82 and m.v > top * 0.3
+		var bars: float = m.sv * auth * (0.68 if over else (0.88 if m.slide else 1.0))
+		var lateral: float = bars - pull
+		m.d += (lateral + m.push) * dt
 		m.push *= exp(-5.0 * dt)
-		m.s += ds * dt
+		# what you see: the bike points where it is really going and leans for the turn it is actually making
+		var want_psi: float = atan2(lateral + m.push, max(4.0, m.v))
+		m.psi += (want_psi - m.psi) * min(1.0, dt * 12.0)
+		var v2: float = m.v * m.v
+		var a_req: float = v2 * road.kappa_at(m.s)
+		var q: float = bars / pull if abs(pull) > 0.5 else 0.0
+		var a_eff: float = a_req * clamp(q, -0.2, 1.25)
+		var want_lean: float = atan2(a_eff, G) + m.sv * 0.33 * (1.0 - min(1.0, abs(q)))
+		want_lean = clamp(want_lean, -0.95, 0.95) * clamp(m.v / 8.0, 0.0, 1.0)
+		m.lean += (want_lean - m.lean) * min(1.0, dt * 10.0)
+		m.s += m.v * cos(m.psi) * dt
 		# pedals
 		m.gas_on = gas
 		if stopping:
@@ -858,14 +870,14 @@ func _update_foe(f: Rider, dt: float) -> void:
 			break
 	if f.is_cop and abs(f.d) > 7.2:
 		tx = sign(f.d) * 5.6
-	var lat_max: float = max(1.5, f.v * 0.32)
-	var want: float = clamp(clamp(tx - f.d, -7.2, 7.2) * 1.6 * (0.72 + 0.006 * f.hand), -lat_max, lat_max)
+	var lat_max: float = max(1.5, f.v * 0.45)
+	var want: float = clamp(clamp(tx - f.d, -7.2, 7.2) * 2.0 * (0.72 + 0.006 * f.hand), -lat_max, lat_max)
 	f.vx += (want - f.vx) * min(1.0, dt * 5.0)
 	f.d = clamp(f.d + (f.vx + f.push) * dt, -12.4, 12.4)
 	f.push *= exp(-3.0 * dt)
 	f.s += f.v * dt
 	var k: float = road.kappa_at(f.s)
-	var a_lat: float = clamp(f.v * f.v * k, -f.a_grip, f.a_grip) + f.vx * 2.6
+	var a_lat: float = clamp(f.v * f.v * k, -f.a_grip, f.a_grip) + f.vx * 3.5
 	f.lean += (atan2(a_lat, G) * clamp(f.v / 8.0, 0.0, 1.0) - f.lean) * min(1.0, dt * 8.0)
 	f.psi = atan2(f.vx, max(4.0, f.v))
 	f.rpm = clamp(f.v / max(1.0, f.top), 0.2, 1.0)
