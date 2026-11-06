@@ -3,6 +3,10 @@ extends Node
 
 var path := "user://save.json"
 var data: Dictionary = {}
+var key_codes := {}     # action -> physical keycodes, rebuilt whenever the keys change
+
+const KEY_ACTIONS := [["gas", "Газ"], ["left", "Влево"], ["right", "Вправо"], ["brake", "Тормоз"], ["hand", "Рука"], ["kick", "Нога"], ["pause", "Пауза"]]
+const KEY_NAMES := {"": "нет", "Up": "Вверх", "Down": "Вниз", "Left": "Влево", "Right": "Вправо", "Space": "Пробел", "Escape": "Esc", "Comma": ",", "Period": ".", "Slash": "/", "Semicolon": ";", "Apostrophe": "'", "BracketLeft": "[", "BracketRight": "]", "Minus": "-", "Equal": "=", "Backslash": "\\", "QuoteLeft": "`", "Ctrl": "Ctrl", "Shift": "Shift", "Alt": "Alt"}
 
 func _ready() -> void:
 	D.load_all()
@@ -11,7 +15,7 @@ func _ready() -> void:
 func fresh() -> Dictionary:
 	var strek: Dictionary = D.bike_by_id["strek"]
 	return {
-		"v": 1, "money": 0, "open": 1, "best": {}, "sound": true,
+		"v": 1, "money": 0, "open": 1, "best": {}, "sound": true, "volume": 0.7, "keys": default_keys(),
 		"bikes": {"strek": new_bike(strek)}, "ride": {"0": "strek"},
 		"gear": {"glove": 0, "boot": 0, "baton": 0, "chain": 0, "suit": 0, "suits": [0], "helmet": 0, "helmets": [0], "suitColor": 0, "helmColor": 5, "weaponPick": "best"},
 	}
@@ -27,6 +31,7 @@ func _ints(a: Array) -> Array:
 
 func load_save() -> void:
 	data = fresh()
+	_rebuild_keys()
 	if not FileAccess.file_exists(path):
 		return
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -53,6 +58,14 @@ func load_save() -> void:
 		b.paints = _ints(b.get("paints", [b.paint]))
 	for id in data.best:
 		data.best[id] = int(data.best[id])
+	var keys: Dictionary = default_keys()
+	if data.get("keys") is Dictionary:
+		for a in keys:
+			var saved: Variant = data.keys.get(a)
+			if saved is Array and saved.size() == 2:
+				keys[a] = saved
+	data.keys = keys
+	_rebuild_keys()
 
 func persist() -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
@@ -62,6 +75,93 @@ func persist() -> void:
 
 func reset_for_test() -> void:
 	data = fresh()
+	_rebuild_keys()
+
+# ---------- sound ----------
+func sound_on() -> bool:
+	return bool(data.sound) and float(data.volume) > 0.001
+
+# the slider follows the ear, not the amplitude: half way is about a quarter of the signal
+func volume_db() -> float:
+	var v: float = clamp(float(data.volume), 0.0, 1.0)
+	return linear_to_db(max(v * v, 0.00001))
+
+# ---------- keys ----------
+func default_keys() -> Dictionary:
+	var out := {}
+	var k: Dictionary = D.rules["keys"]
+	for a in k:
+		var pair: Array = []
+		for n in k[a]:
+			pair.append(str(n).replace("Arrow", "").replace("Key", ""))
+		out[a] = pair
+	return out
+
+func _rebuild_keys() -> void:
+	key_codes.clear()
+	for a in data.keys:
+		var list: Array = []
+		for n in data.keys[a]:
+			if n != null:
+				var code := OS.find_keycode_from_string(str(n))
+				if code != KEY_NONE:
+					list.append(code)
+		key_codes[a] = list
+
+func key_down(action: String) -> bool:
+	for code in key_codes.get(action, []):
+		if Input.is_physical_key_pressed(code):
+			return true
+	return false
+
+func action_of_key(code: int) -> String:
+	for a in key_codes:
+		if code in key_codes[a]:
+			return a
+	return ""
+
+func key_label(n: Variant) -> String:
+	if n == null:
+		return "нет"
+	return KEY_NAMES.get(str(n), str(n))
+
+func action_name(a: String) -> String:
+	for x in KEY_ACTIONS:
+		if x[0] == a:
+			return x[1]
+	return a
+
+# Same rules as the 2D game. An empty code removes the key. Returns what to tell the player.
+func assign_key(a: String, i: int, code: String) -> String:
+	var K: Dictionary = data.keys
+	var old: Variant = K[a][i]
+	var msg := ""
+	if code == "":
+		if K[a][1 - i] == null:
+			return "Нужна хотя бы одна клавиша на действие."
+		K[a][i] = null
+		msg = "Клавиша убрана."
+	elif code != old:
+		var from: Array = []
+		for act in K:
+			for slot in 2:
+				if K[act][slot] == code:
+					from = [act, slot]
+		if not from.is_empty() and old == null and from[0] != a and K[from[0]][1 - from[1]] == null:
+			return "Это единственная клавиша действия «%s». Сначала дай ему другую." % action_name(from[0])
+		if not from.is_empty():
+			K[from[0]][from[1]] = old
+		K[a][i] = code
+		if not from.is_empty() and from[0] != a:
+			msg = ("Поменялись клавишами с действием «%s»." if old != null else "Клавиша забрана у действия «%s».") % action_name(from[0])
+	_rebuild_keys()
+	persist()
+	return msg
+
+func reset_keys() -> void:
+	data.keys = default_keys()
+	_rebuild_keys()
+	persist()
 
 # ---------- lookups ----------
 func track_open(i: int) -> bool:

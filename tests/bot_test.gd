@@ -2,6 +2,7 @@ extends Node
 # Runs whole races with no screen. godot --headless --path . res://tests/bot_test.tscn -- [track] [bike] [peace]
 
 var human := false
+var phone := false
 
 func _ready() -> void:
 	var d: Node = D
@@ -14,6 +15,7 @@ func _ready() -> void:
 		list = [[0, "strek"], [0, "buivol"], [1, "buivol"], [2, "shershen"], [3, "volk"], [3, "karavan"], [4, "sapsan"], [4, "osa"], [5, "grom"], [5, "tsunami"]]
 	var peace := args.size() >= 3 and "peace" in args[2]
 	human = args.size() >= 3 and "human" in args[2]
+	phone = args.size() >= 3 and "phone" in args[2]
 	for e in list:
 		for seed_v in [1, 2]:
 			_race(d, e[0], e[1], seed_v, peace)
@@ -28,6 +30,7 @@ func _race(d: Node, ti: int, bid: String, seed_v: int, peace: bool) -> void:
 	sim.bot = true
 	sim.bot_peace = peace
 	sim.bot_human = human
+	sim.bot_phone = phone
 	var dt := 1.0 / 60.0
 	var maxv := 0.0
 	var sum_v := 0.0

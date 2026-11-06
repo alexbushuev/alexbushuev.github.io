@@ -15,6 +15,12 @@ static var mid: Font
 static var small: Font
 static var drag_total := 0.0
 
+static func is_phone() -> bool:
+	return OS.has_feature("web_ios") or OS.has_feature("web_android") or OS.has_feature("mobile")
+
+static func has_touch() -> bool:
+	return is_phone() or DisplayServer.is_touchscreen_available()
+
 static func label(txt: String, f: Font = null, sz := 16, col := PAPER, wrap := false) -> Label:
 	var l := Label.new()
 	l.text = txt
@@ -58,6 +64,7 @@ static func button(txt: String, cb: Callable, bg := INK3, fg := PAPER, sz := 16,
 	b.add_theme_font_override("font", f if f != null else mid)
 	b.add_theme_font_size_override("font_size", sz)
 	b.focus_mode = Control.FOCUS_NONE
+	b.button_down.connect(func() -> void: UiKit.drag_total = 0.0)
 	b.pressed.connect(func() -> void:
 		if UiKit.drag_total < 14.0:
 			cb.call())

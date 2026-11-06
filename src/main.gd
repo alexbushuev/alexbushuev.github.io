@@ -2,7 +2,7 @@ extends Node
 # Screens: menu, garage, shop, bar, start screen, race, result.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 5
+const BUILD_NO := 6
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -28,6 +28,7 @@ var fps_low_t := 0.0
 var quality := 1.0
 var quality_max := -1.0
 var auto_mode := ""     # command line: screenshot tests
+var settings_open := false
 
 func _font(lat: String, cyr: String) -> FontFile:
 	var f: FontFile = load("res://assets/fonts/" + lat)
@@ -75,6 +76,7 @@ func _ready() -> void:
 	menu = root_ui
 	audio = GameAudio.new()
 	add_child(audio)
+	audio.apply_settings()
 	get_viewport().size_changed.connect(_fit_resolution)
 	_fit_resolution()
 	var args := OS.get_cmdline_user_args()
@@ -90,7 +92,7 @@ func _ready() -> void:
 func _fit_resolution() -> void:
 	var win: Vector2i = DisplayServer.window_get_size()
 	if quality_max < 0.0:
-		var phone: bool = OS.has_feature("web_ios") or OS.has_feature("web_android") or OS.has_feature("mobile")
+		var phone: bool = UiKit.is_phone()
 		quality_max = 720.0 / max(win.y, 1) if phone else 1080.0 / max(win.y, 1)
 		quality_max = min(quality_max, 1.0)
 		quality = quality_max
@@ -160,6 +162,7 @@ func _show_menu() -> void:
 	head.add_child(_button("Гараж", _open_garage.bind(""), UiKit.YEL, UiKit.INK))
 	head.add_child(_button("Магазин", _open_shop.bind(-1, ""), UiKit.PAPER, UiKit.INK))
 	head.add_child(_button("Бар", _open_bar.bind(-1), Color("#7a1f3d"), UiKit.PAPER))
+	head.add_child(_button("Настройки", _open_settings, UiKit.INK3, UiKit.PAPER))
 	v.add_child(head)
 	var list := ScrollList.new()
 	v.add_child(list)
@@ -218,6 +221,22 @@ func _show_menu() -> void:
 		S.add_test_money()
 		_show_menu(), UiKit.INK2, UiKit.MUTED, 13))
 	list.box.add_child(tests)
+
+func _open_settings() -> void:
+	settings_open = true
+	_clear_ui()
+	_bg(UiKit.INK if not paused else Color(0.05, 0.05, 0.07, 0.86))
+	var ui := SettingsUi.new()
+	menu.add_child(ui)
+	ui.open(audio)
+	ui.close_requested.connect(_close_settings)
+
+func _close_settings() -> void:
+	settings_open = false
+	if paused and running:
+		_show_pause()
+	else:
+		_show_menu()
 
 func _begin(i: int) -> void:
 	if not S.track_open(i):
@@ -327,7 +346,9 @@ func _toggle_pause() -> void:
 	if sim == null or not running:
 		return
 	paused = not paused
+	hud.set_active(not paused)
 	if paused:
+		audio.quiet()
 		_show_pause()
 	else:
 		_clear_ui()
@@ -343,10 +364,15 @@ func _show_pause() -> void:
 	c.add_child(v)
 	v.add_child(_label("Пауза", font_big, 44, Color("#ffc81f")))
 	v.add_child(_button("Дальше", _toggle_pause, Color("#ffc81f"), Color("#16151b"), 22))
-	v.add_child(_button("Заново", _start_race.bind(pending_track)))
-	v.add_child(_button("В меню", _quit_to_menu))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.add_child(_button("Заново", _start_race.bind(pending_track)))
+	row.add_child(_button("Настройки", _open_settings))
+	row.add_child(_button("В меню", _quit_to_menu))
+	v.add_child(row)
 
 func _quit_to_menu() -> void:
+	paused = false
 	_show_menu()
 
 func _show_result(kind: String) -> void:
@@ -421,8 +447,14 @@ func _ledger_line(a: String, b: String, col: Color, bold := false) -> HBoxContai
 	return h
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and running:
-		if event.physical_keycode == KEY_ESCAPE or event.physical_keycode == KEY_P:
+	if event is InputEventKey and event.pressed and not event.echo and running and not settings_open:
+		if S.action_of_key(event.physical_keycode) == "pause":
+			_toggle_pause()
+
+# With the gas on by itself the bike would ride on while a notification or another app has the screen
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT or what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
+		if running and not paused and auto_mode == "":
 			_toggle_pause()
 
 func _process(delta: float) -> void:
@@ -598,6 +630,9 @@ func _ui_shots(out: String) -> void:
 		get_viewport().get_texture().get_image().save_png("%s_%s.png" % [out, n])
 	_show_menu()
 	await snap.call("menu")
+	_open_settings()
+	await snap.call("settings")
+	settings_open = false
 	_open_garage("")
 	await snap.call("garage")
 	var g: GarageUi = menu.get_child(0)

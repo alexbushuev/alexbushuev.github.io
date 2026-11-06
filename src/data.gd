@@ -89,7 +89,7 @@ func rider_stats(b: Dictionary, u: Dictionary, ts: int, th: int, glove := 0, boo
 	var c: Dictionary = leagues[int(b.cat)]
 	var kmh: float = s.kmh * (1.0 - aero_loss(fx.aero, s.kmh))
 	return {
-		"gears": int(c.gears), "shift": c.shift, "cyl": int(c.cyl), "idle": c.idle, "red": c.red,
+		"gears": int(c.gears), "shift": c.shift, "cyl": int(c.cyl), "idle": c.idle, "red": c.red, "f_lo": c.fLo, "f_hi": c.fHi,
 		"kmh": kmh, "top": world_speed(kmh), "accel": s.acc * (1.0 - weight_loss(fx.kg, s.hp)),
 		"a_grip": a_grip(s.grip, s.hand), "a_brake": a_brake(s.grip, world_speed(kmh)), "off": 1.2 - 0.006 * s.grip,
 		"grip_f": grip_f(s.grip), "steer": steer_k(s.hand), "dur": s.dur, "prot": fx.prot, "no_hand": fx.no_hand, "hit_k": fx.hit,

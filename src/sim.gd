@@ -140,6 +140,7 @@ var inp := {"steer": 0.0, "gas": false, "brake": false, "hand": false, "kick": f
 var bot := false
 var bot_peace := false
 var bot_human := false   # bot presses buttons like a thumb: full left, full right or nothing, with a reaction delay
+var bot_phone := false   # no gas button: full gas unless it brakes, like a phone
 var _hum_t := 0.0
 var _hum_steer := 0.0
 var demo := false
@@ -856,6 +857,8 @@ func _bot_input() -> void:
 	else:
 		inp.gas = me.v < lim * 0.97
 		inp.brake = me.v > lim * 1.02
+		if bot_phone:
+			inp.gas = not inp.brake
 	inp.hand = false
 	inp.kick = false
 	if not bot_peace:

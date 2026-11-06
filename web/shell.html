@@ -40,6 +40,38 @@ const BUILD = "__BUILD__";
   };
 })();
 </script>
+<script>
+/* Sounds that loop. Godot's web playback restarts a looping sound by hand at the end of every pass, which clicks;
+   a short engine loop clicked over a hundred times a second. The browser's own loop has no seam and does not care about the frame rate. */
+window.gazLoops = (function () {
+  let ac = null;
+  const voices = {};
+  const open = () => { if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)(); return ac; };
+  const wake = () => { open(); if (ac.state !== 'running') ac.resume().catch(() => {}); };
+  ['touchend', 'click', 'keydown', 'pointerup'].forEach(e => window.addEventListener(e, wake, { capture: true, passive: true }));
+  document.addEventListener('visibilitychange', () => { if (!ac) return; if (document.hidden) ac.suspend(); else ac.resume().catch(() => {}); });
+  const put = (id, pitch, gain) => {
+    const v = voices[id];
+    if (!v) return;
+    const t = ac.currentTime;
+    v.src.playbackRate.setTargetAtTime(pitch, t, 0.015);
+    v.amp.gain.setTargetAtTime(gain, t, 0.015);
+  };
+  return {
+    make(id, b64, rate) {
+      const c = open(), bin = atob(b64), n = bin.length >> 1, buf = c.createBuffer(1, n, rate), d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) { const u = bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8); d[i] = (u >= 32768 ? u - 65536 : u) / 32000; }
+      const src = c.createBufferSource(), amp = c.createGain();
+      src.buffer = buf; src.loop = true; amp.gain.value = 0;
+      src.connect(amp); amp.connect(c.destination); src.start();
+      voices[id] = { src, amp };
+    },
+    voice: put,
+    engine(pitch, a, b, c) { put('e0', pitch, a); put('e1', pitch, b); put('e2', pitch, c); },
+    clear() { for (const id of Object.keys(voices)) { try { voices[id].src.stop(); voices[id].amp.disconnect(); } catch (e) {} delete voices[id]; } }
+  };
+})();
+</script>
 <script src="$GODOT_URL?v=__BUILD__"></script>
 <script>
 const GODOT_CONFIG = $GODOT_CONFIG;

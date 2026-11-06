@@ -1,5 +1,5 @@
 class_name Hud extends Control
-# Numbers on screen and the touch deck: left hand steers or hits, right hand gas and brake. Same layout as the 2D game.
+# Numbers on screen and the touch deck. On a phone the gas works by itself: left thumb steers, right thumb brakes and hits.
 
 signal pause_pressed
 
@@ -31,7 +31,7 @@ const C_DECK_ON := Color(1.0, 0.78, 0.12, 0.62)
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	touch_mode = DisplayServer.is_touchscreen_available() or OS.has_feature("web_ios") or OS.has_feature("web_android") or OS.has_feature("mobile")
+	touch_mode = UiKit.has_touch()
 	_layout()
 	resized.connect(_layout)
 
@@ -46,19 +46,18 @@ func _layout() -> void:
 	var h: float = size.y
 	var u: float = min(h * 0.22, w * 0.11)
 	var pad: float = max(10.0, w * 0.012)
-	var sw: float = u * 1.2
-	var sh: float = u * 1.08
+	var sw: float = u * 1.25
+	var sh: float = u * 1.2
+	var gap := 8.0
 	var y1: float = h - pad - sh
 	buttons.append({"id": "left", "rect": Rect2(pad, y1, sw, sh), "label": "◀"})
-	buttons.append({"id": "right", "rect": Rect2(pad + sw + 8.0, y1, sw, sh), "label": "▶"})
-	var hh: float = u * 0.82
-	var y2: float = y1 - 8.0 - hh
-	buttons.append({"id": "hand", "rect": Rect2(pad, y2, sw, hh), "label": "РУКА"})
-	buttons.append({"id": "kick", "rect": Rect2(pad + sw + 8.0, y2, sw, hh), "label": "НОГА"})
-	var gw: float = u * 1.3
-	var gh: float = u * 1.9
-	buttons.append({"id": "gas", "rect": Rect2(w - pad - gw, h - pad - gh, gw, gh), "label": "ГАЗ"})
-	buttons.append({"id": "brake", "rect": Rect2(w - pad - gw * 2.0 - 8.0, h - pad - gh * 0.72, gw, gh * 0.72), "label": "ТОРМОЗ"})
+	buttons.append({"id": "right", "rect": Rect2(pad + sw + gap, y1, sw, sh), "label": "▶"})
+	var rx: float = w - pad - sw * 2.0 - gap
+	buttons.append({"id": "brake", "rect": Rect2(rx, y1, sw * 2.0 + gap, sh), "label": "ТОРМОЗ"})
+	var hh: float = u * 0.86
+	var y2: float = y1 - gap - hh
+	buttons.append({"id": "hand", "rect": Rect2(rx, y2, sw, hh), "label": "РУКА"})
+	buttons.append({"id": "kick", "rect": Rect2(rx + sw + gap, y2, sw, hh), "label": "НОГА"})
 	buttons.append({"id": "pause", "rect": Rect2(w - pad - 46.0, pad, 46.0, 34.0), "label": "II"})
 
 func button_at(p: Vector2) -> String:
@@ -70,10 +69,20 @@ func button_at(p: Vector2) -> String:
 				return b.id
 	return best
 
+# paused: the deck under the pause screen must not catch fingers meant for its buttons
+func set_active(on: bool) -> void:
+	set_process_input(on)
+	touches.clear()
+	pressed.clear()
+
 func _input(event: InputEvent) -> void:
 	if sim == null:
 		return
-	if event is InputEventScreenTouch:
+	if event is InputEventKey:
+		# a touch laptop or a phone with a keyboard: whatever was used last decides
+		if event.pressed and S.action_of_key(event.physical_keycode) != "":
+			touch_mode = false
+	elif event is InputEventScreenTouch:
 		touch_mode = true
 		var id := button_at(event.position)
 		if event.pressed:
@@ -86,10 +95,11 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventScreenDrag:
 		var id2 := button_at(event.position)
 		var prev: String = touches.get(event.index, "")
-		# a thumb slides between left and right without lifting
-		if id2 != prev and (prev in ["left", "right", "gas", "brake"]) and (id2 in ["left", "right", "gas", "brake"]):
-			touches[event.index] = id2
-			_recount()
+		# a thumb slides across the buttons of its own side without lifting
+		for side in [["left", "right"], ["brake", "hand", "kick"]]:
+			if id2 != prev and prev in side and id2 in side:
+				touches[event.index] = id2
+				_recount()
 		get_viewport().set_input_as_handled()
 
 func _press(id: String) -> void:
@@ -101,22 +111,15 @@ func _recount() -> void:
 	for k in touches:
 		pressed[touches[k]] = true
 
-func _key(names: Array) -> bool:
-	for n in names:
-		var code := OS.find_keycode_from_string(str(n).replace("Arrow", "").replace("Key", ""))
-		if code != KEY_NONE and Input.is_physical_key_pressed(code):
-			return true
-	return false
-
 func read_input() -> void:
-	var k: Dictionary = D.rules["keys"]
-	var left: bool = pressed.has("left") or _key(k.left)
-	var right: bool = pressed.has("right") or _key(k.right)
+	var left: bool = pressed.has("left") or S.key_down("left")
+	var right: bool = pressed.has("right") or S.key_down("right")
 	sim.inp.steer = (1.0 if right else 0.0) - (1.0 if left else 0.0)
-	sim.inp.gas = pressed.has("gas") or _key(k.gas)
-	sim.inp.brake = pressed.has("brake") or _key(k.brake)
-	sim.inp.hand = pressed.has("hand") or _key(k.hand)
-	sim.inp.kick = pressed.has("kick") or _key(k.kick)
+	var brake: bool = pressed.has("brake") or S.key_down("brake")
+	sim.inp.brake = brake
+	sim.inp.gas = S.key_down("gas") or (touch_mode and not brake and sim.phase != "count")
+	sim.inp.hand = pressed.has("hand") or S.key_down("hand")
+	sim.inp.kick = pressed.has("kick") or S.key_down("kick")
 
 func handle_event(e: Array) -> void:
 	match e[0]:
@@ -189,8 +192,6 @@ func _draw() -> void:
 			var on: bool = pressed.has(b.id)
 			var r: Rect2 = b.rect
 			var col: Color = C_DECK_ON if on else C_DECK
-			if b.id == "gas" and not on:
-				col = Color(0.1, 0.5, 0.2, 0.34)
 			if b.id == "brake" and not on:
 				col = Color(0.6, 0.1, 0.1, 0.32)
 			draw_rect(r, col)

@@ -23,6 +23,11 @@
     godot --headless --path . res://tests/rules_test.tscn     # копы, деньги, сохранение
     godot --headless --path . res://tests/traffic_test.tscn   # трафик против байка
     godot --headless --path . res://tests/steer_test.tscn     # замеры руля
+    godot --headless --path . res://tests/settings_test.tscn  # уровни мотора, кнопки, раскладка телефона
+
+Реальный звук: `AUDIO_MARKS=/tmp/m.txt xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 320x180 --write-movie /tmp/a.avi res://tests/audio_probe.tscn`, потом `python3 tools/audio_measure.py /tmp/a.avi /tmp/m.txt`.
+
+В браузере зацикленные звуки (мотор, сирена, визг) играет страница, `gazLoops` в `web/shell.html`: у Godot в вебе цикл перезапускается вручную и щёлкает. Разовые звуки и сборка для ПК идут через Godot.
     # кадры без экрана
     xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 1280x590 -- shot 4 sapsan /tmp/a 10,20
     xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 1280x590 -- ui /tmp/u   # все экраны
@@ -40,6 +45,6 @@
 
 1. Езда, соперники, удары, падения, полиция, трафик, звук. Готово.
 2. Гараж, магазин, деньги, экипировка, сохранение, бар с досье, экран перед стартом. Готово.
-3. Настройка кнопок (есть в 2D). Шлифовка: управление, физика, ощущение скорости, звук, эффекты.
+3. Настройки звука и кнопок, автогаз на телефоне. Готово. Шлифовка: управление, физика, ощущение скорости, звук, эффекты.
 4. Больше деталей на трассах, анимации, лучшие модели.
 5. Сборка для ПК (.exe), потом Android и iPhone.
