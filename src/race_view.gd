@@ -5,6 +5,8 @@ var sim: Sim
 var world: World
 var cam: Camera3D
 var views: Array[BikeView] = []
+var ped_views: Array[PedView] = []
+var ped_of := {}          # Sim.Ped -> PedView
 var me_view: BikeView
 var car_nodes: Array[MeshInstance3D] = []
 var brake_nodes: Array[Node3D] = []
@@ -21,6 +23,7 @@ var cam_h := 2.7
 var cam_look_h := -0.2
 var fov_now := 56.0
 var cam_roll := 0.0
+var cam_air := 0.0
 var debug_close := false
 var last_path := 0
 
@@ -69,6 +72,11 @@ func build(s: Sim) -> void:
 	me_view = _add_bike(s.me)
 	for f in s.foes:
 		_add_bike(f)
+	for k in 8:
+		var pv := PedView.new()
+		add_child(pv)
+		pv.build_ped(s)
+		ped_views.append(pv)
 	await get_tree().process_frame
 	_build_cars(theme)
 	sparks = _particles(Color(1.0, 0.75, 0.25), 0.06, 0.45, 26, 70.0, Vector2(3, 11), -9.0)
@@ -76,6 +84,24 @@ func build(s: Sim) -> void:
 	smoke = _particles(Color(0.85, 0.85, 0.88, 0.16), 0.45, 0.4, 5, 40.0, Vector2(0.5, 2), 1.0)
 	dust = _particles(Color(theme.grass[0]).lightened(0.2), 0.32, 0.4, 7, 60.0, Vector2(1, 4), -6.0)
 	world.update_visibility(s.me.s, draw_dist)
+
+# people crossing: each one the sim has gets a body from the pool, and gives it back when he is gone
+func _sync_peds(delta: float, cam_s: float) -> void:
+	for pv in ped_views:
+		if pv.p != null and not (pv.p in sim.peds):
+			ped_of.erase(pv.p)
+			pv.p = null
+			pv.visible = false
+	for p in sim.peds:
+		if not ped_of.has(p):
+			for pv in ped_views:
+				if pv.p == null:
+					pv.assign(p)
+					ped_of[p] = pv
+					break
+	for pv in ped_views:
+		if pv.p != null:
+			pv.refresh_ped(delta, cam_s)
 
 func _add_bike(r: Sim.Rider) -> BikeView:
 	var v := BikeView.new()
@@ -151,6 +177,11 @@ func handle_event(e: Array) -> void:
 			shake = max(shake, 0.12)
 		"bump":
 			shake = max(shake, 0.1)
+		"land":
+			var hv: float = float(e[1]) if e[1] != null else 2.0
+			shake = max(shake, clamp(hv * 0.035, 0.03, 0.3))
+			if hv > 3.0:
+				_fx(dust, sim.rd(sim.me).world(sim.me.s, sim.me.d, 0.1))
 		"dust":
 			if Engine.get_process_frames() % 6 == 0:
 				_fx(dust, sim.rd(sim.me).world(sim.me.s, sim.me.d, 0.1))
@@ -162,6 +193,7 @@ func _process(delta: float) -> void:
 	world.update_visibility(me.ps, draw_dist)
 	for v in views:
 		v.refresh(delta, me.ps)
+	_sync_peds(delta, me.ps)
 	for i in sim.cars.size():
 		var c: Sim.Car = sim.cars[i]
 		var node: MeshInstance3D = car_nodes[i]
@@ -197,9 +229,13 @@ func _update_camera(delta: float) -> void:
 	var want_dist: float = lerp(4.8, 5.6, pct) + (2.2 + min(9.0, abs(me.fly_s - me.s) * 0.6) if falling else 0.0)
 	cam_dist += (want_dist - cam_dist) * min(1.0, delta * 2.5)
 	var back: float = focus_s - cam_dist
-	var cp := on.world(back if me.path != 0 else max(1.0, back), cam_d, cam_h + (0.6 if falling else 0.0))
+	# off a crest the camera goes up with the bike, a little behind it, and keeps the road in view
+	var lift: float = (on.height_at(me.s) + me.air_h - on.height_at(back)) if me.air else 0.0
+	# lags a little going up, so you see the bike leave the road
+	cam_air += (lift - cam_air) * min(1.0, delta * (2.5 if me.air else 4.0))
+	var cp := on.world(back if me.path != 0 else max(1.0, back), cam_d, cam_h + (0.6 if falling else 0.0) + max(0.0, cam_air))
 	var look_ahead: float = lerp(14.0, 20.0, pct)
-	var lp := on.world(focus_s + look_ahead, lerp(cam_d, focus_d, 0.6) + me.psi * 2.0, cam_look_h)
+	var lp := on.world(focus_s + look_ahead, lerp(cam_d, focus_d, 0.6) + me.psi * 2.0, cam_look_h + max(0.0, cam_air) * 0.5)
 	if shake > 0.0:
 		shake = max(0.0, shake - delta * 1.1)
 		var sx := randf_range(-shake, shake)

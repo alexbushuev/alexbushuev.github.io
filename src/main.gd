@@ -2,7 +2,7 @@ extends Node
 # Screens: menu, garage, shop, bar, start screen, race, result.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 9
+const BUILD_NO := 10
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -398,8 +398,8 @@ func _update_mirror() -> void:
 	var on: Road = sim.rd(me)
 	var s_now: float = me.s if me.state == Sim.RIDE else me.fly_s
 	var d_now: float = me.d if me.state == Sim.RIDE else me.fly_d
-	var p := on.world(s_now - 1.3, d_now, 1.35)
-	var back := on.world(s_now - 40.0, d_now * 0.7, 0.9)
+	var p := on.world(s_now - 1.3, d_now, 1.35 + me.air_h)
+	var back := on.world(s_now - 40.0, d_now * 0.7, 0.9 + me.air_h * 0.5)
 	mirror_cam.look_at_from_position(p, back, Vector3.UP)
 	# every other frame is plenty for a mirror, and halves what it costs
 	mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE if Engine.get_process_frames() % 2 == 0 else SubViewport.UPDATE_DISABLED
@@ -631,6 +631,9 @@ func _run_shots() -> void:
 	if mode == "tour":
 		await _tour_shots(out)
 		return
+	if mode == "b10":
+		await _b10_shots(out)
+		return
 	var times: Array = str(args[4]).split(",")
 	var i := 0
 	Engine.max_fps = 0
@@ -839,6 +842,109 @@ func _tour_shots(out: String) -> void:
 			await get_tree().process_frame
 		get_viewport().get_texture().get_image().save_png("%s_%02d_%s.png" % [out, n, sp[0]])
 		n += 1
+	get_tree().quit()
+
+# build 10: a jump off a crest, people on a crossing, a slope sign, a rival knocked down on foot
+func _b10_shots(out: String) -> void:
+	sim.bot_peace = true
+	for k in 240:
+		sim.step(STEP)
+	sim.events.clear()
+	var me := sim.me
+	var snap := func(n: String) -> void:
+		for e in sim.events:
+			race_view.handle_event(e)
+			hud.handle_event(e)
+		sim.events.clear()
+		await get_tree().process_frame
+		await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png("%s_%s.png" % [out, n])
+		print("%s: s=%.0f v=%.0f air=%.1f m" % [n, me.s, sim.dial(me, me.v), me.air_h])
+	var place := func(s: float, d: float, v: float) -> void:
+		me.path = 0
+		me.s = s
+		me.d = d
+		me.v = v
+		me.state = Sim.RIDE
+		me.inv = 3.0
+		me.air = false
+		sim._calc_ps(me)
+		race_view.cam_d = d
+		for f in sim.foes:
+			if not f.is_cop:
+				f.s = s + 900.0
+	# the jump: flat out over the first crest
+	if not sim.road.kickers.is_empty():
+		var kk: Dictionary = sim.road.kickers[0]
+		place.call(float(kk.s) - 150.0, 1.8, me.top * 0.95)
+		var n := 0
+		var taken := 0
+		for k in 900:
+			sim.step(STEP)
+			await get_tree().process_frame
+			if me.s > float(kk.s) - 30.0 and k % 5 == 0 and taken < 8:
+				race_view.debug_close = taken == 2
+				await snap.call("jump%d" % taken)
+				race_view.debug_close = false
+				taken += 1
+			if taken >= 8:
+				break
+	# slope signs
+	for i in min(2, sim.road.slopes.size()):
+		place.call(float(sim.road.slopes[i][0]) - 100.0, 1.8, 3.0)
+		for k in 8:
+			me.v = 3.0
+			sim.step(STEP)
+			await get_tree().process_frame
+		await snap.call("slope%d" % i)
+	# a crossing with a light and a heavy one on it
+	if not sim.road.crossings.is_empty():
+		var cs: float = sim.road.crossings[0].s
+		sim._cross_i = 999
+		sim.peds.clear()
+		for h in [false, true]:
+			var p := Sim.Ped.new()
+			p.s = cs + (0.0 if h else 1.2)
+			p.d = -1.0 if h else 4.6
+			p.heavy = h
+			p.v = 0.0
+			p.dir = 1.0
+			p.look = 2
+			sim.peds.append(p)
+		place.call(cs - 40.0, 1.8, 2.0)
+		for k in 20:
+			me.v = 2.0
+			sim.step(STEP)
+			await get_tree().process_frame
+		await snap.call("crossing")
+		# ride into the light one
+		sim.bot = false
+		sim.inp = {"steer": 0.0, "gas": false, "brake": false, "hand": false, "kick": false}
+		me.d = sim.peds[0].d
+		me.v = 18.0
+		for k in 160:
+			sim.step(STEP)
+			await get_tree().process_frame
+			if sim.peds.size() > 0 and sim.peds[0].state == 1 and k % 8 == 0:
+				await snap.call("pedhit%03d" % k)
+		sim.bot = true
+	# a rival on his feet, running back to his bike
+	var f: Sim.Rider = sim.foes[0]
+	place.call(1200.0, 1.8, 3.0)
+	f.s = 1214.0
+	f.d = 5.4
+	f.v = 0.0
+	f.state = Sim.DOWN
+	f.run_phase = 2
+	f.run_t = 0.3
+	f.fly_s = 1211.0
+	f.fly_d = 1.6
+	f.down_dur = 0.0
+	for k in 10:
+		me.v = 3.0
+		sim.step(STEP)
+		await get_tree().process_frame
+	await snap.call("onfoot")
 	get_tree().quit()
 
 func _cop_shots(out: String) -> void:

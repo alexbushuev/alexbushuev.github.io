@@ -49,5 +49,10 @@
  "gore": 0.0,
  "hole": 0.0,
  "pillar": 0.0,
- "deck": 0.0
+ "deck": 0.0,
+ "warn_up": 0.15,
+ "warn_down": 0.15,
+ "warn_bump": 0.15,
+ "warn_ped": 0.15,
+ "ped_sign": 0.15
 }

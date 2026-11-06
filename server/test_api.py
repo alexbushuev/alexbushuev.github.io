@@ -46,11 +46,14 @@ srv = subprocess.Popen([sys.executable, os.path.join(HERE, "gaz_api.py")], env=e
 time.sleep(1.2)
 try:
     s, r = call("GET", "/ping")
-    ok(r.get("v") == 2, "version 2")
+    ok(r.get("v") == 3, "version 3")
     s, r = call("GET", "/records")
     ok(r["ko"].get("dachi", [{}])[0].get("ko") == 4 and r["ko"]["dachi"][0]["login"] == "Старый", "old results became knockout records: %s" % r["ko"])
     s, r = call("POST", "/register", {"login": "Санечка", "password": "1"})
     me = r["token"]
+    s, r = call("POST", "/result", {"track": "ring", "bike": "Tsunami 1300cc", "time_ms": 150000, "ko": 1, "ko_cops": 0, "finished": True, "diff": 0}, me)
+    s, r = call("GET", "/records")
+    ok(r["time"]["ring"][0]["diff"] == 0, "difficulty kept with the record")
     # ten runs of one player on one track: one row, the best
     for t, ko, kc in [(120000, 1, 0), (110000, 4, 0), (115000, 2, 3), (130000, 0, 0), (109000, 0, 0), (111000, 5, 0), (140000, 1, 1), (125000, 0, 0), (118000, 4, 1), (119000, 0, 0)]:
         call("POST", "/result", {"track": "rice", "bike": "Buffalo 200cc", "time_ms": t, "ko": ko, "ko_cops": kc, "finished": True}, me)

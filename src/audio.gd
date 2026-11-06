@@ -381,6 +381,12 @@ func handle_event(e: Array) -> void:
 			play("baton", -8.0, 0.6)
 		"bump":
 			play("kick", -5.0, 0.8)
+		"ped":
+			play("ko", -2.0 if e[1] else -6.0, 0.8 if e[1] else 1.3)
+		"land":
+			# suspension bottoming out: louder and lower the harder he comes down
+			var hv: float = float(e[1]) if e[1] != null else 2.0
+			play("ko", clamp(-16.0 + hv * 1.6, -16.0, -2.0), clamp(1.15 - hv * 0.05, 0.65, 1.1))
 		"denied":
 			play("beep", -12.0, 0.4)
 

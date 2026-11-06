@@ -97,7 +97,7 @@ func render() -> void:
 	name_l.text = "%s %dcc" % [bike.name, int(bike.cc)]
 	sub_l.text = "%d км/ч, приз за первое место %s" % [int(st.kmh), S.fmt(t.prize)]
 	var pr: float = min(0.95, float(D.gear.suits[int(g.suit)].prot) + float(D.gear.helmets[int(g.helmet)].prot))
-	var hurt := S.fall_pct(float(st.kmh), pr)
+	var hurt := int(round(S.fall_pct(float(st.kmh), pr) * [0.7, 1.0, 1.3][int(S.data.difficulty)]))
 	warn_l.text = ""
 	if hurt >= 30:
 		warn_l.text = "Падение на полной скорости снимет %d%% здоровья%s" % [hurt, ", два таких подряд и больница" if hurt >= 50 else ""]
@@ -158,7 +158,7 @@ func render() -> void:
 	var who := ""
 	for e in t.roster:
 		who += ("" if who == "" else ", ") + str(D.rivals[e[0]].name)
-	list.box.add_child(UiKit.label(who + ". Постов полиции: %d." % t.cops.size(), UiKit.small, 14, UiKit.PAPER, true))
+	list.box.add_child(UiKit.label(who + ". Постов полиции: %d. Сложность: %s (меняется в настройках)." % [t.cops.size(), str(S.DIFF_NAMES[int(S.data.difficulty)]).to_lower()], UiKit.small, 14, UiKit.PAPER, true))
 	list.box.add_child(UiKit.button("В бар: узнать про них", func() -> void: bar_requested.emit(cat), UiKit.INK2, UiKit.PAPER, 14))
 	list.keep_scroll()
 

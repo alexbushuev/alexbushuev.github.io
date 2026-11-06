@@ -6,7 +6,7 @@
 #   alpha = (slot+.5)/16 -> the engine paints this part from a palette slot, RGB is a shade multiplier
 #   slot 15              -> self-lit part (lamps, windows at night), RGB is the light colour
 # Axes in Blender: +X right, +Y forward, +Z up. In the glTF files forward becomes -Z and up +Y.
-import bpy, json, math, os, sys
+import bpy, bmesh, json, math, os, sys
 from mathutils import Vector
 
 OUT = sys.argv[-1]
@@ -92,6 +92,25 @@ class Kit:
         bpy.ops.mesh.primitive_torus_add(major_segments=seg, minor_segments=mseg, major_radius=major,
                                          minor_radius=minor, location=loc, rotation=rot)
         return self._finish(bpy.context.object, c, group, smooth)
+
+    def plate(self, pts, y0, y1, c, group='main'):
+        """A flat shape facing -Y: the outline pts [(x, z), ...] given anticlockwise, thick from y0 to y1."""
+        n = len(pts)
+        verts = [(x, y0, z) for x, z in pts] + [(x, y1, z) for x, z in pts]
+        faces = [list(range(n)), list(range(2 * n - 1, n - 1, -1))]
+        for i in range(n):
+            j = (i + 1) % n
+            faces.append([n + i, n + j, j, i])
+        me = bpy.data.meshes.new('plate')
+        me.from_pydata(verts, [], faces)
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        o = bpy.data.objects.new('plate', me)
+        bpy.context.collection.objects.link(o)
+        return self._finish(o, c, group, False)
 
     def disc(self, loc, r, depth, c, group='main', verts=14, axis='x'):
         rot = {'x': (0, math.pi / 2, 0), 'y': (math.pi / 2, 0, 0), 'z': (0, 0, 0)}[axis]
@@ -639,6 +658,53 @@ def make_decor():
         k.tube((s * .15, 1.05, 1.42), (s * .6, 1.0, 1.55), .05, hexc('#d8d2c0'), g, verts=5, r2=.01, smooth=False)
         for y in (-.6, .6):
             k.tube((s * .3, y, .8), (s * .3, y, 0), .1, hexc('#2c2827'), g, verts=5, smooth=False)
+    done(g)
+    # ---------- build 10: warning signs as on Russian roads, and the pedestrian crossing sign ----------
+    RED, WHITE, INK, BLUE = hexc('#d9232e'), hexc('#f3eedf'), hexc('#16151b'), hexc('#1f5fc8')
+
+    def tri(cz, side):
+        h = side * math.sqrt(3) / 2
+        return [(-side / 2, cz - h / 3), (side / 2, cz - h / 3), (0, cz + 2 * h / 3)]
+
+    def walker(g, x, z, s, y, c):
+        # a person mid-stride, as the sign draws him
+        k.disc((x + .02 * s, y, z + .2 * s), .05 * s, .01, c, g, verts=10, axis='y')
+        k.plate([(x - .035 * s, z - .02 * s), (x + .045 * s, z - .02 * s), (x + .06 * s, z + .14 * s), (x - .01 * s, z + .14 * s)], y, y - .008, c, g)
+        k.plate([(x - .03 * s, z - .02 * s), (x + .005 * s, z - .02 * s), (x - .06 * s, z - .2 * s), (x - .1 * s, z - .19 * s)], y, y - .008, c, g)
+        k.plate([(x + .005 * s, z - .02 * s), (x + .045 * s, z - .02 * s), (x + .1 * s, z - .19 * s), (x + .06 * s, z - .2 * s)], y, y - .008, c, g)
+        k.plate([(x + .01 * s, z + .12 * s), (x + .04 * s, z + .13 * s), (x + .11 * s, z + .02 * s), (x + .08 * s, z + .0 * s)], y, y - .008, c, g)
+        k.plate([(x - .0 * s, z + .12 * s), (x + .03 * s, z + .13 * s), (x - .05 * s, z + .02 * s), (x - .08 * s, z + .03 * s)], y, y - .008, c, g)
+
+    for g in ('warn_up', 'warn_down', 'warn_bump', 'warn_ped'):
+        cz = 2.45
+        k.tube((0, 0, 0), (0, 0, 2.1), .045, slot(METAL), g, verts=5, smooth=False)
+        k.plate(tri(cz, 1.0), -.02, -.045, RED, g)
+        k.plate(tri(cz, .76), -.045, -.055, WHITE, g)
+        zb = cz - .16
+        if g == 'warn_up':      # 1.14 steep climb: the slope rises to the right, the grade is written by the game
+            k.plate([(-.24, zb), (.24, zb), (.24, zb + .17)], -.055, -.063, INK, g)
+        elif g == 'warn_down':  # 1.13 steep descent
+            k.plate([(-.24, zb), (.24, zb), (-.24, zb + .17)], -.055, -.063, INK, g)
+        elif g == 'warn_bump':  # 1.16 rough road: two humps
+            pts = [(.24, zb - .03), (.24, zb)]
+            for cx in (.11, -.11):
+                for i in range(9):
+                    a = math.pi * i / 8
+                    pts.append((cx + .1 * math.cos(a), zb + .09 * math.sin(a)))
+            pts += [(-.24, zb), (-.24, zb - .03)]
+            k.plate(pts, -.055, -.063, INK, g)
+        else:                   # 1.22 pedestrian crossing
+            walker(g, 0, cz + .02, 1.0, -.056, INK)
+            for i in range(4):
+                k.box((-.18 + i * .12, -.058, zb - .03), (.07, .006, .03), INK, g)
+        done(g)
+    g = 'ped_sign'   # 5.19.1 pedestrian crossing: blue square, white triangle, a man on the zebra
+    k.tube((0, 0, 0), (0, 0, 2.15), .045, slot(METAL), g, verts=5, smooth=False)
+    k.box((0, -.035, 2.5), (.72, .03, .72), BLUE, g)
+    k.plate(tri(2.47, .6), -.05, -.058, WHITE, g)
+    walker(g, -.01, 2.47, .8, -.059, INK)
+    for i in range(4):
+        k.box((-.15 + i * .1, -.06, 2.33), (.06, .006, .025), INK, g)
     done(g)
     g = 'chev'
     k.tube((0, 0, 0), (0, 0, .9), .05, slot(METAL), g, verts=5, smooth=False)

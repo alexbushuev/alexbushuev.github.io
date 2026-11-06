@@ -24,6 +24,8 @@
     godot --headless --path . res://tests/traffic_test.tscn   # трафик против байка
     godot --headless --path . res://tests/steer_test.tscn     # замеры руля
     godot --headless --path . res://tests/settings_test.tscn  # уровни мотора, кнопки, раскладка телефона
+    godot --headless --path . res://tests/hill_test.tscn      # подъёмы и спуски, трамплины, скорость байков на уклоне
+    godot --headless --path . res://tests/foot_test.tscn      # пешеходы, сбить бегущего к байку, сложность
 
 Реальный звук: `AUDIO_MARKS=/tmp/m.txt xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 320x180 --write-movie /tmp/a.avi res://tests/audio_probe.tscn`, потом `python3 tools/audio_measure.py /tmp/a.avi /tmp/m.txt`.
 
@@ -57,10 +59,10 @@
 
 ## Сервер аккаунтов и рекордов
 
-`server/gaz_api.py`: один файл, только стандартная библиотека Python и SQLite. Логин и пароль (scrypt), сохранение на аккаунт с защитой от перезаписи с другого устройства, результаты заездов. Таблицы, топ-10: на каждой трассе лучшее время и лучший заезд по нокаутам (одна строка на игрока), плюс нокауты за всё время. Соперники считаются отдельными игроками: после твоего финиша игра досчитывает их гонку и отправляет их время и нокауты. Проверка: `python3 server/test_api.py`.
+`server/gaz_api.py`: один файл, только стандартная библиотека Python и SQLite. Логин и пароль (scrypt), сохранение на аккаунт с защитой от перезаписи с другого устройства, результаты заездов. Таблицы, топ-10: на каждой трассе лучшее время и лучший заезд по нокаутам (одна строка на игрока), плюс нокауты за всё время. Соперники считаются отдельными игроками: после твоего финиша игра досчитывает их гонку и отправляет их время и нокауты (только с заездов на средней сложности). У каждого рекорда записана сложность, на которой он поставлен. Проверка: `python3 server/test_api.py`.
 
 Установка на сервер один раз, от root: `curl -fsSL https://raw.githubusercontent.com/alexbushuev/alexbushuev.github.io/gaz-api/setup.sh | bash`. Служба работает от пользователя gaz, база в `/var/lib/gaz-api/data`, Caddy передаёт ей `/gaz-api/`. Новые версии приходят сами каждые 5 минут из ветки `gaz-api` (sha256 из манифеста), выкладка: `tools/publish_api.sh`. Отключить автообновление: удалить `/etc/cron.d/gaz-api-update`.
 
 Проверка на своей машине: `GAZ_DB=/tmp/t.db GAZ_PORT=8788 python3 server/gaz_api.py`, `python3 tools/dev_server.py 8123 http://127.0.0.1:8788` (сайт из dist/ плюс API, как Caddy), `GAZ_API=http://127.0.0.1:8788/gaz-api godot --headless --path . res://tests/net_test.tscn`.
 
-Другие тесты: `tests/branch_test` (развилки и выигрыш срезки по времени), `tests/build_time` (сколько строится трасса), `tests/geo_dump` (точки трассы для картинки), режим снимков `-- shot <трасса> <байк> <папка> 1 tour` (тоннели, мосты, развилки).
+Другие тесты: `tests/branch_test` (развилки и выигрыш срезки по времени), `tests/build_time` (сколько строится трасса), `tests/geo_dump` (точки трассы для картинки), режим снимков `-- shot <трасса> <байк> <папка> 1 tour` (тоннели, мосты, развилки) и `-- shot <трасса> <байк> <папка> 0 b10` (прыжок, знаки уклона, переход с пешеходами).

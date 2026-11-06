@@ -258,6 +258,7 @@ func build(r: Road, t: Dictionary, draw_dist: float) -> void:
 	_build_tunnels(ground_mat)
 	for bi in road.branches.size():
 		_build_branch(bi, ground_mat)
+	_build_zebras()
 
 func _add_gantry(kind: String, s: float) -> void:
 	var mi := MeshInstance3D.new()
@@ -301,7 +302,7 @@ func _rule_add(placed: Dictionary, kind: String, s: float, d: float, flip: bool,
 	if kind in ["fence", "rail", "conc", "wallb"]:
 		yaw = 0.0
 	# signs face the traffic coming towards them, turned a little to the road
-	if kind in ["sign", "slimit", "bigsign", "tsign", "chev", "gore"]:
+	if kind in ["sign", "slimit", "bigsign", "tsign", "chev", "gore", "warn_up", "warn_down", "warn_bump", "warn_ped", "ped_sign"]:
 		yaw = (0.18 if d > 0.0 else -0.18)
 	if kind in ["hay", "shed", "cont1", "cont2", "cont3", "rock"]:
 		yaw += rng.randf_range(-0.5, 0.5)
@@ -506,6 +507,11 @@ func _label3d(xf: Transform3D, text: String, kind: String) -> Label3D:
 			off = Vector3(0, 2.35, 0.065)
 			px = 0.0028
 			l.modulate = Color("#16151b")
+		"warn_up", "warn_down":
+			# the grade sits over the low end of the slope, as on the real signs
+			off = Vector3(-0.09 if kind == "warn_up" else 0.09, 2.5, 0.066)
+			px = 0.0016
+			l.modulate = Color("#16151b")
 		"bigsign":
 			off = Vector3(0, 3.4, 0.1)
 			px = 0.0046
@@ -538,8 +544,8 @@ func _xf(on: Road, s: float, d: float, yaw: float) -> Transform3D:
 func _place_features(placed: Dictionary) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(theme.get("seed", 1)) * 37 + int(road.length)
-	var sgn := func(kind: String, s: float, d: float, text: String) -> void:
-		_rule_add(placed, kind, s, d, false, rng, false, text)
+	var sgn := func(kind: String, s: float, d: float, text: String) -> bool:
+		return _rule_add(placed, kind, s, d, false, rng, false, text)
 	sgn.call("tsign", road.start_s + 70.0, Road.EDGE + 1.6, SIGN_TEXT[_theme_i()][0])
 	for m in [1000.0, 500.0]:
 		if road.finish_s - m > road.start_s + 300.0:
@@ -559,6 +565,22 @@ func _place_features(placed: Dictionary) -> void:
 		var txt: String = (word + " →") if b.side > 0 else ("← " + word)
 		for back in [230.0, 100.0]:
 			sgn.call("bigsign", b.s0 - back, b.side * (Road.EDGE + 3.4), txt)
+	# steep climbs and descents get their warning sign with the grade on it, a crest you can fly off a rough-road sign
+	var last_warn := -1e9
+	for sl in road.slopes:
+		var at: float = float(sl[0]) - 70.0
+		if at - last_warn < 160.0 or at < road.start_s + 40.0:
+			continue
+		if sgn.call("warn_up" if float(sl[2]) > 0.0 else "warn_down", at, Road.EDGE + 1.6, "%d%%" % int(round(abs(float(sl[2])) * 100.0))):
+			last_warn = at
+	for kk in road.kickers:
+		sgn.call("warn_bump", float(kk.s) - 110.0, Road.EDGE + 1.6, "")
+	for c in road.crossings:
+		var cs: float = c.s
+		for sd in [-1.0, 1.0]:
+			sgn.call("ped_sign", cs + 3.0 * sd, sd * (Road.EDGE + 1.3), "")
+		if not road.city:
+			sgn.call("warn_ped", cs - 120.0, Road.EDGE + 1.6, "")
 
 func _tex(w: int, h: int, fn: Callable) -> ImageTexture:
 	var img := Image.create_empty(w, h, false, Image.FORMAT_RGB8)
@@ -640,6 +662,42 @@ func _strip(on: Road, sa: float, sb: float, step: float, across: Array, cols: Ar
 			arr[Mesh.ARRAY_TEX_UV] = PackedVector2Array(pc2[2])
 		var nrm := PackedVector3Array()
 		nrm.resize((pc2[0] as Array).size())
+		nrm.fill(Vector3.UP)
+		arr[Mesh.ARRAY_NORMAL] = nrm
+		var mesh := ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = mat
+		chunks[ci].add_child(mi)
+
+# white stripes across all four lanes where people cross, laid on the road surface
+func _build_zebras() -> void:
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	var pieces := {}
+	for c in road.crossings:
+		var cs: float = c.s
+		var ci := int(cs / CHUNK)
+		if not pieces.has(ci):
+			pieces[ci] = [[], []]   # plain arrays: a packed array inside an array is a copy, appending to it changes nothing
+		var d := -6.9
+		while d < 7.0:
+			var q := [road.world(cs - 2.0, d, 0.03), road.world(cs - 2.0, d + 0.5, 0.03), road.world(cs + 2.0, d, 0.03), road.world(cs + 2.0, d + 0.5, 0.03)]
+			for k in [0, 2, 1, 1, 2, 3]:
+				pieces[ci][0].append(q[k])
+				pieces[ci][1].append(Color("#e9e6dc"))
+			d += 1.0
+	for ci in pieces:
+		if ci < 0 or ci >= chunks.size():
+			continue
+		var arr := []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = PackedVector3Array(pieces[ci][0])
+		arr[Mesh.ARRAY_COLOR] = PackedColorArray(pieces[ci][1])
+		var nrm := PackedVector3Array()
+		nrm.resize((pieces[ci][0] as Array).size())
 		nrm.fill(Vector3.UP)
 		arr[Mesh.ARRAY_NORMAL] = nrm
 		var mesh := ArrayMesh.new()

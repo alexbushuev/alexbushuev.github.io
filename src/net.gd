@@ -211,7 +211,7 @@ func send_result(sim: Sim, kind: String) -> void:
 	var body := {
 		"track": str(sim.tr.id), "bike": "%s %dcc" % [b.name, int(b.cc)], "finished": kind == "finish",
 		"time_ms": int(round(sim.stats.t_finish * 1000.0)) if kind == "finish" else 0,
-		"ko": int(sim.stats.ko), "ko_cops": int(sim.stats.cop_ko), "place": int(sim.final_place),
+		"ko": int(sim.stats.ko), "ko_cops": int(sim.stats.cop_ko), "place": int(sim.final_place), "diff": sim.diff,
 	}
 	call_api(HTTPClient.METHOD_POST, "/result", body, func(data: Variant, err: String) -> void:
 		if err != "":
@@ -225,7 +225,8 @@ func send_result(sim: Sim, kind: String) -> void:
 
 # After your race the rivals still out there ride on, a little each frame, then their times and knockouts go up too
 func finish_bots(sim: Sim) -> void:
-	if not logged_in():
+	# only a race as designed counts for the rivals: on easy they held back, on hard they were pushed
+	if not logged_in() or sim.diff != 1:
 		return
 	sim.start_solo()
 	_finishing.append(sim)

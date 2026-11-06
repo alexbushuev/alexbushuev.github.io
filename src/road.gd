@@ -30,6 +30,9 @@ var side := 1
 var s0 := 0.0
 var s1 := 0.0
 var bumps: Array = []    # potholes on a shortcut, [s, d]
+var kickers: Array = []  # main road: crests sharp enough to fly off, {s, g1, g2, v_safe}
+var slopes: Array = []   # main road: steep stretches for the warning signs, [s_from, s_to, grade at its steepest]
+var crossings: Array = [] # main road: where people cross, {s, zebra}
 
 func curve_radius(c: float, tr: Dictionary) -> float:
 	# Same difficulty curve as the 2D game: what fraction of the league's top speed this bend allows.
@@ -39,27 +42,38 @@ func curve_radius(c: float, tr: Dictionary) -> float:
 	return max(26.0, v * v / A_REF)
 
 var _rng: RandomNumberGenerator
-var _plan: Array = []  # [length, kappa_target, grade_target]
+var _plan: Array = []  # [length, kappa_target, grade_target, metres the grade takes to settle (40 if missing)]
 var _heading := 0.0
 var _done := 0.0
 var _elev := 0.0
 var _gmax := 0.05
 var _hills := 0.3
+var _elev_max := 40.0
 
+# a hill is a real one: at least 40 % of the steepest this track has
 func _hill(p: float) -> float:
 	if _rng.randf() >= _hills * p:
 		return 0.0
-	var g: float = (_rng.randf() * 2.0 - 1.0) * _gmax
-	if _elev > 40.0 and g > 0.0:
+	var g: float = (0.4 + 0.6 * _rng.randf()) * _gmax * (1.0 if _rng.randf() < 0.5 else -1.0)
+	if _elev > _elev_max and g > 0.0:
 		g = -g
-	if _elev < -40.0 and g < 0.0:
+	if _elev < -_elev_max and g < 0.0:
 		g = -g
 	return g
 
-func _straight(l: float, g: float) -> void:
-	_plan.append([l, 0.0, g])
+func _straight(l: float, g: float, ease_m := 40.0) -> void:
+	_plan.append([l, 0.0, g, ease_m])
 	_done += l
 	_elev += g * l
+
+# A climb that stops dead: the grade flips over a few metres, and whoever comes over it fast leaves the ground.
+func _kicker(v_top: float) -> void:
+	var g1: float = _rng.randf_range(0.08, 0.12)
+	var g2: float = _rng.randf_range(0.05, 0.09)
+	_straight(140.0, g1)
+	kickers.append({"s": _done, "g1": g1, "g2": g2, "v_safe": 1e9})
+	_straight(max(90.0, v_top * 2.4), -g2, 3.0)
+	_straight(60.0, 0.0)
 
 func _curve(c: float, dir: int, ang: float, g: float, tr: Dictionary) -> int:
 	if abs(_heading + dir * ang) > deg_to_rad(82.0):
@@ -126,14 +140,18 @@ func build(tr: Dictionary) -> void:
 	var v_top: float = D.world_speed(tr.kmh)
 	var total: float = v_top * tr.sec * float(D.rules.get("track_k", 1.0))
 	var c_max: float = tr.curve
-	_gmax = clamp(tr.hillH / 30.0 * 0.085, 0.02, 0.09)
+	_gmax = clamp(0.035 + float(tr.hillH) * 0.0025, 0.05, 0.10)
+	_elev_max = 30.0 + float(tr.hillH) * 1.5
 	_hills = tr.hills
 	city = int(tr.theme) in [1, 2, 4]
-	var plan_b: Array = [["fork", 0.28], ["cut", 0.62]]
+	var plan_b: Array = [["kick", 0.1], ["fork", 0.26], ["kick", 0.42], ["cut", 0.58], ["kick", 0.76]]
 	_straight(start_s + 120.0, 0.0)
 	while _done < total:
 		if not plan_b.is_empty() and _done >= total * float(plan_b[0][1]):
-			_branch_bend(plan_b[0][0], v_top)
+			if plan_b[0][0] == "kick":
+				_kicker(v_top)
+			else:
+				_branch_bend(plan_b[0][0], v_top)
 			plan_b.pop_front()
 			continue
 		var r := _rng.randf()
@@ -158,14 +176,18 @@ func build(tr: Dictionary) -> void:
 	var h := 0.0
 	var k_now := 0.0
 	var g_now := 0.0
+	# whole 2 m steps, but the total never drifts off the plan: what the plan says sits at s really is at s
+	var plan_len := 0.0
 	for piece in _plan:
-		var steps := int(ceil(piece[0] / DS))
+		plan_len += float(piece[0])
+		var steps: int = maxi(1, int(round(plan_len / DS)) - pos.size())
 		var k0 := k_now
+		var g_ease: float = DS / (float(piece[3]) if piece.size() > 3 else 40.0)
 		for i in steps:
 			# curvature eases linearly over the piece, grade eases over 40 m
 			var t := float(i + 1) / steps
 			k_now = lerp(k0, float(piece[1]), t) if piece[0] < 100.0 or abs(piece[1] - k0) > 1e-5 else float(piece[1])
-			g_now += (float(piece[2]) - g_now) * min(1.0, DS / 40.0)
+			g_now += (float(piece[2]) - g_now) * min(1.0, g_ease)
 			h += k_now * DS
 			var f := Vector3(sin(h), 0.0, -cos(h))
 			pos.append(p)
@@ -180,6 +202,10 @@ func build(tr: Dictionary) -> void:
 	for f in features:
 		_make_branch(f)
 	_pick_tunnels_and_bridges()
+	for kk in kickers:
+		kk.v_safe = safe_jump_speed(float(kk.s))
+	_find_slopes()
+	_pick_crossings()
 
 # ---------- side roads ----------
 # Builds a branch from sampled points: same arrays as the main road, so everything that drives on a Road drives on it
@@ -309,6 +335,10 @@ func _pick_tunnels_and_bridges() -> void:
 	var free := func(a: float, b: float) -> bool:
 		if a < start_s + 300.0 or b > finish_s - 220.0 or in_branch_zone(a, 160.0) or in_branch_zone(b, 160.0):
 			return false
+		# nobody flies into a tunnel roof or an overpass
+		for kk in kickers:
+			if b > float(kk.s) - 200.0 and a < float(kk.s) + 200.0:
+				return false
 		for x in taken:
 			if b > x[0] - 200.0 and a < x[1] + 200.0:
 				return false
@@ -385,6 +415,114 @@ func kappa_at(s: float) -> float:
 
 func grade_at(s: float) -> float:
 	return grade[_i(s)]
+
+func height_at(s: float) -> float:
+	var i := _i(s)
+	var t: float = clamp((s - i * DS) / DS, 0.0, 1.0)
+	return lerp(pos[i].y, pos[i + 1].y, t)
+
+# ---------- jumps ----------
+# The road is straight pieces 2 m long. Where one piece meets the next and the grade drops by dg, the road bends
+# down with a radius of about DS / dg. The wheels stay on it while gravity can follow that bend: v^2 / R < g.
+# Returns the corner between s_from and s_to where a rider at v leaves the ground, or -1.
+func takeoff_between(s_from: float, s_to: float, v: float) -> float:
+	if v < 8.0 or s_to <= s_from:
+		return -1.0
+	var j0 := int(floor(s_from / DS)) + 1
+	var j1 := int(floor(s_to / DS))
+	for j in range(max(1, j0), min(n - 1, j1 + 1)):
+		var dg: float = grade[j - 1] - grade[j]
+		if dg > 0.0 and v * v * dg / DS > 9.81 / sqrt(1.0 + grade[j - 1] * grade[j - 1]):
+			return j * DS
+	return -1.0
+
+# Rides at v from s_from over whatever crest comes and flies:
+# [took off, where it lands, how hard it lands (m/s into the road), highest above the road]
+func simulate_jump(s_from: float, v: float) -> Array:
+	var dt := 1.0 / 60.0
+	var s := s_from
+	while s < s_from + 80.0:
+		var s2: float = s + v * dt
+		var sj := takeoff_between(s, s2, v)
+		if sj >= 0.0:
+			var tt: float = (s2 - sj) / v
+			var vy: float = v * grade_at(sj - 0.5) - 9.81 * tt
+			var y: float = height_at(sj) + v * grade_at(sj - 0.5) * tt - 4.905 * tt * tt
+			s = s2
+			var top := 0.0
+			for k in 2000:
+				vy -= 9.81 * dt
+				y += vy * dt
+				s += v * dt
+				var ground := height_at(s)
+				top = max(top, y - ground)
+				if y <= ground:
+					var g := grade_at(s)
+					return [true, s, (v * g - vy) / sqrt(1.0 + g * g), top]
+			return [true, s, 0.0, top]
+		s = s2
+	return [false, s, 0.0, 0.0]
+
+# the fastest a crest can be taken and still land on the wheels
+func safe_jump_speed(s_crest: float) -> float:
+	var lo := 10.0
+	var hi := 70.0
+	for k in 8:
+		var mid: float = (lo + hi) * 0.5
+		var j := simulate_jump(s_crest - 20.0, mid)
+		if not j[0] or float(j[2]) < 7.5:
+			lo = mid
+		else:
+			hi = mid
+	return lo
+
+# steep stretches, for the signs: 6 % and more for at least 50 m
+func _find_slopes() -> void:
+	var s := start_s
+	var run_a := -1.0
+	var steep := 0.0
+	while s < finish_s:
+		var g: float = grade_at(s)
+		if abs(g) >= 0.06 and (run_a < 0.0 or sign(g) == sign(steep)):
+			if run_a < 0.0:
+				run_a = s
+				steep = g
+			elif abs(g) > abs(steep):
+				steep = g
+		else:
+			if run_a >= 0.0 and s - run_a >= 50.0:
+				slopes.append([run_a, s, steep])
+			run_a = -1.0
+			steep = 0.0
+			if abs(g) >= 0.06:
+				continue
+		s += 4.0
+
+# where people cross: a zebra every few hundred metres in town, a path across now and then outside it
+func _pick_crossings() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = int(length) * 13 + 5
+	var s := start_s + 260.0
+	while s < finish_s - 150.0:
+		s += r.randf_range(200.0, 350.0) if city else r.randf_range(300.0, 520.0)
+		# a bit further on if this spot is a bend, a crest, a tunnel or a bridge
+		for k in 12:
+			if s >= finish_s - 150.0 or _crossing_ok(s):
+				break
+			s += 20.0
+		if s < finish_s - 150.0 and _crossing_ok(s):
+			crossings.append({"s": s, "zebra": city})
+
+func _crossing_ok(s: float) -> bool:
+	if in_branch_zone(s, 120.0) or abs(kappa_at(s)) > 1.0 / 90.0 or feature_at(s, "tunnel") != null:
+		return false
+	for kk in kickers:
+		if s > float(kk.s) - 220.0 and s < float(kk.s) + 160.0:
+			return false
+	for f in features:
+		if f.kind == "bridge" and abs(s - float(f.s)) < 40.0:
+			return false
+	return true
 
 func world(s: float, d: float, y := 0.0) -> Vector3:
 	var i := _i(s)

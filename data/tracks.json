@@ -34,12 +34,12 @@
   "roster": [
    [
     "kuz",
-    "shmel",
+    "gekkon",
     "chain"
    ],
    [
     "ded",
-    "shmel"
+    "strek"
    ],
    [
     "shnyr",
@@ -47,7 +47,7 @@
    ],
    [
     "valera",
-    "strek"
+    "shmel"
    ],
    [
     "siply",
@@ -59,7 +59,7 @@
    ],
    [
     "zina",
-    "strek"
+    "shmel"
    ]
   ]
  },
@@ -98,7 +98,7 @@
   "roster": [
    [
     "hrom",
-    "gekkon"
+    "rys"
    ],
    [
     "karb",
@@ -106,7 +106,7 @@
    ],
    [
     "valera",
-    "gekkon"
+    "shmel"
    ],
    [
     "babai",
@@ -114,7 +114,7 @@
    ],
    [
     "shnyr",
-    "shmel"
+    "gekkon"
    ],
    [
     "mazut",
@@ -122,7 +122,7 @@
    ],
    [
     "zina",
-    "shmel"
+    "strek"
    ]
   ]
  },
@@ -161,19 +161,19 @@
   "roster": [
    [
     "gvozd",
-    "shershen"
-   ],
-   [
-    "babai",
     "kobra"
    ],
    [
-    "svarshik",
+    "babai",
     "brodyaga"
    ],
    [
-    "ryzhiy",
+    "svarshik",
     "shershen"
+   ],
+   [
+    "ryzhiy",
+    "kobra"
    ],
    [
     "valera",
@@ -226,11 +226,11 @@
   "roster": [
    [
     "hrom",
-    "volk"
+    "karavan"
    ],
    [
     "mazut",
-    "karavan"
+    "volk"
    ],
    [
     "babai",
@@ -238,11 +238,11 @@
    ],
    [
     "svarshik",
-    "volk"
+    "brodyaga"
    ],
    [
     "karb",
-    "kobra"
+    "volk"
    ],
    [
     "shnyr",
@@ -291,7 +291,7 @@
   "roster": [
    [
     "gvozd",
-    "sapsan"
+    "osa"
    ],
    [
     "karb",
@@ -360,25 +360,25 @@
   "roster": [
    [
     "gvozd",
-    "grom"
+    "tsunami"
    ],
    [
     "karb",
-    "tsunami",
+    "grom",
     "chain"
    ],
    [
     "hrom",
-    "grom",
+    "tsunami",
     "baton"
    ],
    [
     "babai",
-    "tsunami"
+    "grom"
    ],
    [
     "ryzhiy",
-    "grom",
+    "osa",
     "baton"
    ],
    [

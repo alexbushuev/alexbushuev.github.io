@@ -1,5 +1,5 @@
 class_name SettingsUi extends Control
-# Sound and controls. Keys work like the 2D game: a main and a spare key for every action, a taken key swaps places.
+# Difficulty, sound and controls. Keys work like the 2D game: a main and a spare key for every action, a taken key swaps places.
 
 signal close_requested
 
@@ -180,8 +180,34 @@ func _exit_tree() -> void:
 	if made_engine:
 		audio.stop_all()
 
+const DIFF_TXT := ["Соперники впереди тебя сбавляют до 15 %. Урон тебе: 70 %.",
+	"Всё как задумано: полные скорости байков, полный урон.",
+	"Отстающие соперники жмут до 15 % быстрее своего байка. Урон тебе: 130 %."]
+
+func _render_difficulty() -> void:
+	list.box.add_child(UiKit.heading("Сложность"))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var cur: int = int(S.data.difficulty)
+	for i in 3:
+		var k := i
+		var on: bool = k == cur
+		var b := UiKit.button(S.DIFF_NAMES[k], func() -> void:
+			S.data.difficulty = k
+			S.persist()
+			_render_controls(), UiKit.YEL if on else UiKit.INK3, UiKit.INK if on else UiKit.PAPER, 15)
+		b.name = "Diff%d" % k
+		b.custom_minimum_size = Vector2(0, 36)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(b)
+	list.box.add_child(row)
+	list.box.add_child(UiKit.label(DIFF_TXT[cur], UiKit.small, 14, UiKit.PAPER, true))
+	if cur != 1:
+		list.box.add_child(UiKit.label("В таблице рекордов рядом с твоим результатом будет пометка.", UiKit.small, 13, UiKit.MUTED, true))
+
 func _render_controls() -> void:
 	UiKit.clear(list.box)
+	_render_difficulty()
 	list.box.add_child(UiKit.heading("Управление"))
 	if UiKit.is_phone():
 		list.box.add_child(UiKit.label("Газ работает сам, отпустил тормоз и поехал.", UiKit.mid, 16, UiKit.PAPER, true))

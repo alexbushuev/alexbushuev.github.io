@@ -6,6 +6,8 @@ var data: Dictionary = {}
 var key_codes := {}     # action -> physical keycodes, rebuilt whenever the keys change
 
 const KEY_ACTIONS := [["gas", "Газ"], ["left", "Влево"], ["right", "Вправо"], ["brake", "Тормоз"], ["hand", "Рука"], ["kick", "Нога"], ["pause", "Пауза"]]
+const DIFF_NAMES := ["Лёгкая", "Средняя", "Сложная"]
+const DIFF_TAGS := ["лёгкая", "", "сложная"]
 const KEY_NAMES := {"": "нет", "Up": "Вверх", "Down": "Вниз", "Left": "Влево", "Right": "Вправо", "Space": "Пробел", "Escape": "Esc", "Comma": ",", "Period": ".", "Slash": "/", "Semicolon": ";", "Apostrophe": "'", "BracketLeft": "[", "BracketRight": "]", "Minus": "-", "Equal": "=", "Backslash": "\\", "QuoteLeft": "`", "Ctrl": "Ctrl", "Shift": "Shift", "Alt": "Alt"}
 
 func _ready() -> void:
@@ -15,7 +17,7 @@ func _ready() -> void:
 func fresh() -> Dictionary:
 	var strek: Dictionary = D.bike_by_id["strek"]
 	return {
-		"v": 1, "money": 0, "open": 1, "best": {}, "sound": true, "volume": 0.8, "vol_engine": 1.0, "vol_voice": 1.0, "mirrors": true, "keys": default_keys(),
+		"v": 1, "money": 0, "open": 1, "best": {}, "sound": true, "volume": 0.8, "vol_engine": 1.0, "vol_voice": 1.0, "mirrors": true, "difficulty": 1, "keys": default_keys(),
 		"bikes": {"strek": new_bike(strek)}, "ride": {"0": "strek"},
 		"gear": {"glove": 0, "boot": 0, "baton": 0, "chain": 0, "suit": 0, "suits": [0], "helmet": 0, "helmets": [0], "suitColor": 0, "helmColor": 5, "weaponPick": "best"},
 	}
@@ -56,6 +58,7 @@ func apply(loaded: Dictionary) -> void:
 	data.gear.helmets = _ints(data.gear.helmets)
 	data.money = int(data.money)
 	data.open = int(data.open)
+	data.difficulty = clampi(int(data.get("difficulty", 1)), 0, 2)
 	for id in data.bikes:
 		var b: Dictionary = data.bikes[id]
 		for key in ["eng", "acc", "tire", "susp", "frame", "paint"]:
@@ -225,7 +228,7 @@ func loadout(id: String) -> Dictionary:
 	var g: Dictionary = data.gear
 	var u: Dictionary = upgrades(id)
 	return {"u": u, "suit": int(g.suit), "helmet": int(g.helmet), "cs": int(g.suitColor), "ch": int(g.helmColor),
-		"extra": {"glove": int(g.glove), "boot": int(g.boot), "weapon": start_weapon(int(g.suit)), "paint": int(u.get("paint", D.bike_by_id[id].paint))}}
+		"extra": {"glove": int(g.glove), "boot": int(g.boot), "weapon": start_weapon(int(g.suit)), "paint": int(u.get("paint", D.bike_by_id[id].paint)), "diff": int(data.difficulty)}}
 
 func round10(v: float) -> int:
 	return int(round(v / 10.0)) * 10

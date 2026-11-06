@@ -99,7 +99,16 @@ func setup(rider: Sim.Rider, sim: Sim) -> void:
 		J[bn] = to_g(D.models.rider.joints[bn])
 		bones[bn] = skel.find_bone(bn)
 	_make_weapons()
-	# a soft dark patch instead of real shadows, cheap on phones
+	blob = MeshInstance3D.new()
+	blob.mesh = blob_mesh()
+	add_child(blob)
+	blob.position = Vector3(0, 0.03, 0)
+	if r.is_cop:
+		_make_cop_lights()
+	_set_pose_static()
+
+# a soft dark patch instead of real shadows, cheap on phones
+static func blob_mesh() -> QuadMesh:
 	if _blob_mesh == null:
 		_blob_mesh = QuadMesh.new()
 		_blob_mesh.size = Vector2(1.6, 2.6)
@@ -115,13 +124,7 @@ func setup(rider: Sim.Rider, sim: Sim) -> void:
 		m.albedo_texture = ImageTexture.create_from_image(img)
 		m.disable_fog = true
 		_blob_mesh.material = m
-	blob = MeshInstance3D.new()
-	blob.mesh = _blob_mesh
-	add_child(blob)
-	blob.position = Vector3(0, 0.03, 0)
-	if r.is_cop:
-		_make_cop_lights()
-	_set_pose_static()
+	return _blob_mesh
 
 func _make_cop_lights() -> void:
 	var b := BoxMesh.new()
@@ -346,9 +349,17 @@ func _pose_on_foot(delta: float, f: Vector3) -> void:
 			_pose(hips3, Quaternion(Vector3.RIGHT, -0.2), Quaternion(Vector3.RIGHT, -bend), Quaternion(Vector3.RIGHT, 0.4),
 				hl3, hr3, Vector3(-0.16, 0.14, 0.08), Vector3(0.16, 0.14, 0.08))
 
+var air_pitch := 0.0
+var _blob_air := false
+
 func _place_on_road(s: float, d: float, yaw: float) -> void:
 	var p := road.world(s, d)
 	var f := road.fwd_at(s)
+	if r.air:
+		# in the air: up off the road, nose along where he is flying
+		p.y += r.air_h
+		var fh := Vector3(f.x, 0.0, f.z).normalized()
+		f = (fh + Vector3.UP * air_pitch).normalized()
 	var up := Vector3.UP
 	var rgt := f.cross(up).normalized()
 	var u2 := rgt.cross(f).normalized()
@@ -398,9 +409,22 @@ func refresh(delta: float, cam_s: float) -> void:
 			rider_root.top_level = false
 			rider_root.transform = Transform3D.IDENTITY
 			lean_node.position = Vector3.ZERO
+		var want_pitch: float = (r.air_vy / max(4.0, r.v)) if r.air else road.grade_at(r.s)
+		air_pitch += (want_pitch - air_pitch) * min(1.0, delta * 7.0)
 		_place_on_road(r.s, r.d, r.psi)
 		lean_node.rotation = Vector3(0, 0, -r.lean)
 		blob.visible = dist < 180.0
+		# the shadow stays on the road and gets smaller the higher he flies
+		if r.air:
+			_blob_air = true
+			var k: float = 1.0 / (1.0 + r.air_h * 0.35)
+			var gp := road.world(r.s, r.d, 0.04)
+			var gf := road.fwd_at(r.s)
+			var rg := gf.cross(Vector3.UP).normalized()
+			blob.global_transform = Transform3D(Basis(rg * k, rg.cross(gf).normalized(), -gf * k), gp)
+		elif _blob_air:
+			_blob_air = false
+			blob.transform = Transform3D(Basis(), Vector3(0, 0.03, 0))
 		if near or int(Engine.get_process_frames() + r.name.length()) % 4 == 0:
 			_pose_riding(delta, near)
 	# wheels

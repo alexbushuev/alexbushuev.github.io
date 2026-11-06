@@ -9,7 +9,7 @@ import hashlib, hmac, json, os, re, secrets, sqlite3, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = 2
+VERSION = 3
 TOP = 10
 BOT_RE = re.compile(r"^[a-z]{2,12}$")
 DB = os.environ.get("GAZ_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "gaz.db"))
@@ -33,6 +33,7 @@ create index if not exists records_track on records(track, time_ms);
 create table if not exists ko_records(user_id integer not null, track text not null, ko integer not null, ko_riders integer not null,
   ko_cops integer not null, bike text not null, at integer not null, primary key(user_id, track));
 create index if not exists ko_track on ko_records(track, ko);
+create table if not exists meta(k text primary key, v text);
 """
 
 
@@ -40,6 +41,15 @@ def migrate(c):
     cols = [r[1] for r in c.execute("pragma table_info(users)").fetchall()]
     if "is_bot" not in cols:
         c.execute("alter table users add column is_bot integer not null default 0")
+    # difficulty of the race a record was set on: 0 easy, 1 normal, 2 hard
+    for tbl in ("records", "ko_records"):
+        if "diff" not in [r[1] for r in c.execute("pragma table_info(%s)" % tbl).fetchall()]:
+            c.execute("alter table %s add column diff integer not null default 1" % tbl)
+    # build 10: hills, jumps and the rivals' bikes changed the tracks, so the times start over; knockouts of people stay
+    if c.execute("select v from meta where k = 'reset10'").fetchone() is None:
+        c.execute("delete from records")
+        c.execute("delete from ko_records where user_id in (select id from users where is_bot = 1)")
+        c.execute("insert into meta(k, v) values('reset10', '1')")
     # the knockouts tables came later: rebuild them from the results kept so far
     if c.execute("select count(*) from ko_records").fetchone()[0] == 0:
         for r in c.execute("select user_id, track, ko, ko_cops, bike, at from results where ko + ko_cops > 0 order by at").fetchall():
@@ -48,24 +58,24 @@ def migrate(c):
 
 
 # one row per player and track: his best time, his best race by knockouts
-def time_best(c, uid, track, t, bike, now):
+def time_best(c, uid, track, t, bike, now, diff=1):
     if not (20000 <= t <= 3600000):
         return False
     old = c.execute("select time_ms from records where user_id = ? and track = ?", (uid, track)).fetchone()
     if old is None or t < old[0]:
-        c.execute("insert or replace into records(user_id, track, time_ms, bike, at) values(?,?,?,?,?)", (uid, track, t, bike, now))
+        c.execute("insert or replace into records(user_id, track, time_ms, bike, at, diff) values(?,?,?,?,?,?)", (uid, track, t, bike, now, diff))
         return True
     return False
 
 
-def ko_best(c, uid, track, ko, ko_cops, bike, now):
+def ko_best(c, uid, track, ko, ko_cops, bike, now, diff=1):
     total = ko + ko_cops
     if total <= 0:
         return False
     old = c.execute("select ko, ko_cops from ko_records where user_id = ? and track = ?", (uid, track)).fetchone()
     if old is None or total > old[0] or (total == old[0] and ko_cops > old[1]):
-        c.execute("insert or replace into ko_records(user_id, track, ko, ko_riders, ko_cops, bike, at) values(?,?,?,?,?,?,?)",
-                  (uid, track, total, ko, ko_cops, bike, now))
+        c.execute("insert or replace into ko_records(user_id, track, ko, ko_riders, ko_cops, bike, at, diff) values(?,?,?,?,?,?,?,?)",
+                  (uid, track, total, ko, ko_cops, bike, now, diff))
         return True
     return False
 
@@ -282,13 +292,14 @@ class H(BaseHTTPRequestHandler):
         finished = bool(b.get("finished"))
         t = int(b.get("time_ms", 0))
         place = int(b.get("place", 0))
+        diff = max(0, min(2, int(b.get("diff", 1))))
         now = int(time.time())
         c.execute("insert into results(user_id, track, time_ms, bike, ko, ko_cops, finished, place, at) values(?,?,?,?,?,?,?,?,?)",
                   (u["id"], track, t, bike, ko, ko_cops, int(finished), place, now))
         c.execute("update users set ko = ko + ?, ko_riders = ko_riders + ?, ko_cops = ko_cops + ? where id = ?",
                   (ko + ko_cops, ko, ko_cops, u["id"]))
-        best = finished and time_best(c, u["id"], track, t, bike, now)
-        ko_new = ko_best(c, u["id"], track, ko, ko_cops, bike, now)
+        best = finished and time_best(c, u["id"], track, t, bike, now, diff)
+        ko_new = ko_best(c, u["id"], track, ko, ko_cops, bike, now, diff)
         mine = c.execute("select time_ms from records where user_id = ? and track = ?", (u["id"], track)).fetchone()
         rank = None
         if mine:
@@ -336,16 +347,16 @@ class H(BaseHTTPRequestHandler):
     def records(self, c):
         me = self.maybe_user(c)
         out = {"time": {}, "ko": {}, "mine": {"time": {}, "ko": {}}}
-        sql_t = "select r.track, u.login, u.is_bot as bot, r.bike, r.time_ms, r.at from records r join users u on u.id = r.user_id order by r.track, r.time_ms, r.at"
+        sql_t = "select r.track, u.login, u.is_bot as bot, r.bike, r.time_ms, r.at, r.diff from records r join users u on u.id = r.user_id order by r.track, r.time_ms, r.at"
         for r in c.execute(sql_t).fetchall():
             lst = out["time"].setdefault(r["track"], [])
             if len(lst) < TOP:
-                lst.append({k: r[k] for k in ("login", "bot", "bike", "time_ms")})
-        sql_k = "select k.track, u.login, u.is_bot as bot, k.bike, k.ko, k.ko_riders, k.ko_cops from ko_records k join users u on u.id = k.user_id order by k.track, k.ko desc, k.ko_cops desc, k.at"
+                lst.append({k: r[k] for k in ("login", "bot", "bike", "time_ms", "diff")})
+        sql_k = "select k.track, u.login, u.is_bot as bot, k.bike, k.ko, k.ko_riders, k.ko_cops, k.diff from ko_records k join users u on u.id = k.user_id order by k.track, k.ko desc, k.ko_cops desc, k.at"
         for r in c.execute(sql_k).fetchall():
             lst = out["ko"].setdefault(r["track"], [])
             if len(lst) < TOP:
-                lst.append({k: r[k] for k in ("login", "bot", "bike", "ko", "ko_riders", "ko_cops")})
+                lst.append({k: r[k] for k in ("login", "bot", "bike", "ko", "ko_riders", "ko_cops", "diff")})
         if me is not None:
             for r in c.execute("select track, time_ms from records where user_id = ?", (me["id"],)).fetchall():
                 rank = 1 + c.execute("select count(*) from records where track = ? and time_ms < ?", (r["track"], r["time_ms"])).fetchone()[0]

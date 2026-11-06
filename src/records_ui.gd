@@ -94,13 +94,13 @@ func render() -> void:
 		return
 	if tab == "all":
 		var list2 := ScrollList.new()
-		list2.box.add_child(_row(["", "Боец", "Всего", "Гонщиков", "Копов"], [26, 0, 62, 80, 62], false, false, true))
+		list2.box.add_child(_row(["", "Боец", "Всего", "Гонщиков", "Копов"], [26, 0, 62, 80, 62], false, "", true))
 		var rows: Array = fighters.get("rows", [])
 		if rows.is_empty():
 			list2.box.add_child(UiKit.label("Пока никто никого не вырубил", UiKit.small, 14, UiKit.MUTED))
 		for i in rows.size():
 			var f: Dictionary = rows[i]
-			list2.box.add_child(_row([str(i + 1), str(f.login), str(int(f.ko)), str(int(f.ko_riders)), str(int(f.ko_cops))], [26, 0, 62, 80, 62], _mine(f), bool(f.get("bot", 0))))
+			list2.box.add_child(_row([str(i + 1), str(f.login), str(int(f.ko)), str(int(f.ko_riders)), str(int(f.ko_cops))], [26, 0, 62, 80, 62], _mine(f), _tag(f)))
 		var me: Variant = fighters.get("mine")
 		if me is Dictionary and int(me.rank) > 10:
 			list2.box.add_child(UiKit.label("Ты %d-й, нокаутов: %d" % [int(me.rank), int(me.ko)], UiKit.mid, 15, UiKit.YEL))
@@ -131,13 +131,13 @@ func render() -> void:
 		if rows.is_empty():
 			list.box.add_child(UiKit.label("Пока никто не финишировал" if tab == "time" else "Пока без нокаутов", UiKit.small, 14, UiKit.MUTED))
 		elif tab == "ko":
-			list.box.add_child(_row(["", "", "Байк", "Всего", "Гонщ.", "Копов"], [22, 0, 0, 40, 40, 40], false, false, true))
+			list.box.add_child(_row(["", "", "Байк", "Всего", "Гонщ.", "Копов"], [22, 0, 0, 40, 40, 40], false, "", true))
 		for i in rows.size():
 			var r: Dictionary = rows[i]
 			if tab == "time":
-				list.box.add_child(_row([str(i + 1), str(r.login), str(r.bike), Hud.race_time(float(r.time_ms) / 1000.0)], [22, 0, 0, 58], _mine(r), bool(r.get("bot", 0))))
+				list.box.add_child(_row([str(i + 1), str(r.login), str(r.bike), Hud.race_time(float(r.time_ms) / 1000.0)], [22, 0, 0, 58], _mine(r), _tag(r)))
 			else:
-				list.box.add_child(_row([str(i + 1), str(r.login), str(r.bike), str(int(r.ko)), str(int(r.ko_riders)), str(int(r.ko_cops))], [22, 0, 0, 40, 40, 40], _mine(r), bool(r.get("bot", 0))))
+				list.box.add_child(_row([str(i + 1), str(r.login), str(r.bike), str(int(r.ko)), str(int(r.ko_riders)), str(int(r.ko_cops))], [22, 0, 0, 40, 40, 40], _mine(r), _tag(r)))
 		var my: Variant = mine.get(t.id)
 		if my is Dictionary and int(my.rank) > rows.size():
 			var val: String = Hud.race_time(float(my.time_ms) / 1000.0) if tab == "time" else "нокаутов %d" % int(my.ko)
@@ -145,28 +145,35 @@ func render() -> void:
 		cols.add_child(col)
 	body.add_child(cols)
 
+# a grey mark after the name: a rival, or a record set on easy or hard
+func _tag(r: Dictionary) -> String:
+	if bool(r.get("bot", 0)):
+		return "бот"
+	return S.DIFF_TAGS[clampi(int(r.get("diff", 1)), 0, 2)]
+
 func _mine(r: Dictionary) -> bool:
 	return N.logged_in() and str(r.login) == N.login and not bool(r.get("bot", 0))
 
-# one line of a table; a width of 0 takes what is left. Rivals carry a grey mark
-func _row(cells: Array, widths: Array, mine: bool, bot := false, head := false) -> PanelContainer:
+# one line of a table; a width of 0 takes what is left. Rivals and records off normal difficulty carry a mark
+func _row(cells: Array, widths: Array, mine: bool, tag := "", head := false) -> PanelContainer:
 	var p := UiKit.panel(UiKit.INK3 if mine else UiKit.INK2, 8, 3)
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 6)
 	p.add_child(h)
 	for i in cells.size():
 		var col: Color = UiKit.YEL if mine else (UiKit.MUTED if head else UiKit.PAPER)
-		if i == 1 and bot:
+		if i == 1 and tag != "":
+			var bot: bool = tag == "бот"
 			var nb := HBoxContainer.new()
 			nb.add_theme_constant_override("separation", 4)
 			nb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			var nl := UiKit.label(cells[i], UiKit.mid, 14, Color("#c9c6d4"))
+			var nl := UiKit.label(cells[i], UiKit.mid, 14, Color("#c9c6d4") if bot else col)
 			nl.clip_text = true
 			nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			nb.add_child(nl)
-			var tag := UiKit.label("бот", UiKit.small, 11, UiKit.MUTED)
-			tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			nb.add_child(tag)
+			var tl := UiKit.label(tag, UiKit.small, 11, UiKit.MUTED if bot else (Color("#7fc77a") if tag == "лёгкая" else Color("#ff7a5c")))
+			tl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			nb.add_child(tl)
 			h.add_child(nb)
 			continue
 		var l := UiKit.label(cells[i], UiKit.mid if (i == 1 or head) else UiKit.small, 14, col)
