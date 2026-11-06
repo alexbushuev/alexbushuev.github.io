@@ -275,6 +275,72 @@ func _pose_riding(delta: float, near: bool) -> void:
 		side_w = "L"
 	for key in weapon_nodes:
 		weapon_nodes[key].visible = weapon != "none" and key == weapon + side_w
+	# in the air: the trick, blended in after take-off and out again before landing
+	if r.air and r.trick != "" and r.trick != "flip" and r.trick != "whip":
+		var u: float = clamp(r.trick_t / max(0.1, r.trick_len), 0.0, 1.0)
+		var w: float = smoothstep(0.0, 0.22, u) * (1.0 - smoothstep(0.72, 1.0, u))
+		var sx: float = -float(sy[0])
+		var sh: float = float(sy[1])
+		match r.trick:
+			"nohands":
+				hl = hl.lerp(Vector3(-0.62, hand_y + 0.72, hand_z + 0.4), w)
+				hr = hr.lerp(Vector3(0.62, hand_y + 0.72, hand_z + 0.4), w)
+				q_spine = q_spine.slerp(Quaternion(Vector3.RIGHT, 0.12), w)
+				q_head = q_head.slerp(Quaternion(Vector3.RIGHT, 0.25), w)
+			"nacnac":
+				# the right leg swung over the back to the left side
+				fr = fr.lerp(Vector3(-0.66, sh + 0.2, sx + 0.12), w)
+				hips = hips.lerp(hips + Vector3(-0.12, 0.08, 0.04), w)
+				q_spine = q_spine.slerp(Quaternion(Vector3.UP, 0.45) * Quaternion(Vector3.RIGHT, -0.2), w)
+			"heel":
+				fl = fl.lerp(Vector3(-0.66, sh + 0.05, sx - 0.15), w)
+				fr = fr.lerp(Vector3(0.66, sh + 0.05, sx - 0.15), w)
+				hips = hips.lerp(hips + Vector3(0, 0.1, 0), w)
+			"superman":
+				# off the pegs, stretched out flat behind the bike, hands still on the bars
+				hips = hips.lerp(Vector3(0, sh + 0.5, sx + 0.32), w)
+				fl = fl.lerp(Vector3(-0.12, sh + 0.66, sx + 1.12), w)
+				fr = fr.lerp(Vector3(0.12, sh + 0.66, sx + 1.12), w)
+				q_hips = q_hips.slerp(Quaternion(Vector3.RIGHT, -1.25), w)
+				q_spine = q_spine.slerp(Quaternion(Vector3.RIGHT, -1.3), w)
+				q_head = q_head.slerp(Quaternion(Vector3.RIGHT, -0.7), w)
+			"seat":
+				# up on his feet on the seat, arms out for balance
+				hips = hips.lerp(Vector3(0, sh + 0.93, sx - 0.02), w)
+				fl = fl.lerp(Vector3(-0.13, sh + 0.07, sx + 0.02), w)
+				fr = fr.lerp(Vector3(0.13, sh + 0.07, sx + 0.02), w)
+				hl = hl.lerp(Vector3(-0.66, sh + 1.62, sx), w)
+				hr = hr.lerp(Vector3(0.66, sh + 1.62, sx), w)
+				q_hips = q_hips.slerp(Quaternion.IDENTITY, w)
+				q_spine = q_spine.slerp(Quaternion(Vector3.RIGHT, 0.08), w)
+				q_head = q_head.slerp(Quaternion.IDENTITY, w)
+	# past the line: joy, a sulk or a rage, as big as his character makes it
+	if r.emote != "" and not r.air:
+		var tt: float = r.emote_t
+		var we: float = smoothstep(0.0, 0.4, tt) * (1.0 - smoothstep(5.2, 6.4, tt))
+		var k: float = r.emote_k
+		match r.emote:
+			"joy":
+				var pump: float = 0.12 * sin(tt * 10.0)
+				hr = hr.lerp(Vector3(0.28, hand_y + 0.9 + pump, hand_z + 0.42), we)
+				if k >= 0.95:
+					hl = hl.lerp(Vector3(-0.28, hand_y + 0.9 - pump, hand_z + 0.42), we)
+				hips = hips.lerp(hips + Vector3(0, 0.2 * k, 0.05), we)
+				q_spine = q_spine.slerp(Quaternion(Vector3.RIGHT, 0.12), we)
+				q_head = q_head.slerp(Quaternion(Vector3.RIGHT, 0.4), we)
+			"sad":
+				q_head = q_head.slerp(Quaternion(Vector3.UP, 0.35 * sin(tt * 2.5)) * Quaternion(Vector3.RIGHT, -0.75), we)
+				q_spine = q_spine.slerp(Quaternion(Vector3.RIGHT, -0.75), we)
+				hl = hl.lerp(Vector3(-0.32, hand_y - 0.38, hand_z + 0.5), we * k)
+			"angry":
+				var shake: float = sin(tt * 18.0) * 0.07 * k
+				if k > 0.75 and int(tt * 1.5) % 2 == 1:
+					# beats the tank with his fist
+					hr = hr.lerp(Vector3(0.12, hand_y - 0.02 - 0.14 * max(0.0, sin(tt * 12.0)), hand_z + 0.36), we)
+				else:
+					hr = hr.lerp(Vector3(0.36 + shake, hand_y + 0.64 + shake, hand_z + 0.32), we)
+				q_head = q_head.slerp(Quaternion(Vector3.UP, 0.45 * sin(tt * 7.0) * k), we)
+				q_spine = q_spine.slerp(Quaternion(Vector3.BACK, -0.2 * k) * Quaternion(Vector3.RIGHT, -0.3), we)
 	_pose(hips, q_hips, q_spine, q_head, hl, hr, fl, fr)
 	if front != null:
 		front.rotation = Vector3.ZERO
@@ -351,6 +417,25 @@ func _pose_on_foot(delta: float, f: Vector3) -> void:
 
 var air_pitch := 0.0
 var _blob_air := false
+var hide_rider := false    # an end-of-race scene has his body: only the bike is drawn here
+
+# The bike's own frame under the rider: its lean, and in the air the flip or the whip, turned about its middle
+func _trick_frame() -> Transform3D:
+	var lb := Basis(Vector3.BACK, -r.lean)
+	if not r.air or (r.trick != "flip" and r.trick != "whip"):
+		return Transform3D(lb, Vector3.ZERO)
+	var u: float = clamp(r.trick_t / max(0.1, r.trick_len), 0.0, 1.0)
+	var rot: Basis
+	if r.trick == "flip":
+		# a back flip: nose up and right over, ending level again
+		rot = Basis(Vector3.RIGHT, TAU * smoothstep(0.0, 1.0, u))
+	else:
+		# the whip: the bike swung sideways and laid flat, then straightened
+		var k: float = sin(PI * smoothstep(0.0, 1.0, u))
+		var side: float = 1.0 if (r.name.length() % 2) == 0 else -1.0
+		rot = Basis(Vector3.UP, 0.75 * k * side) * Basis(Vector3.BACK, -1.05 * k * side)
+	var c := Vector3(0, 0.75, 0)
+	return Transform3D(rot * lb, c - rot * c)
 
 func _place_on_road(s: float, d: float, yaw: float) -> void:
 	var p := road.world(s, d)
@@ -389,6 +474,7 @@ func refresh(delta: float, cam_s: float) -> void:
 			spin_a = 0.0
 			for key in weapon_nodes:
 				weapon_nodes[key].visible = false
+		rider_root.visible = not hide_rider and not r.gone
 		var f := road.fwd_at(r.fly_s)
 		if r.run_phase == 0:
 			spin_a += r.spin * delta
@@ -412,7 +498,8 @@ func refresh(delta: float, cam_s: float) -> void:
 		var want_pitch: float = (r.air_vy / max(4.0, r.v)) if r.air else road.grade_at(r.s)
 		air_pitch += (want_pitch - air_pitch) * min(1.0, delta * 7.0)
 		_place_on_road(r.s, r.d, r.psi)
-		lean_node.rotation = Vector3(0, 0, -r.lean)
+		lean_node.transform = _trick_frame()
+		rider_root.visible = not hide_rider
 		blob.visible = dist < 180.0
 		# the shadow stays on the road and gets smaller the higher he flies
 		if r.air:
@@ -425,7 +512,7 @@ func refresh(delta: float, cam_s: float) -> void:
 		elif _blob_air:
 			_blob_air = false
 			blob.transform = Transform3D(Basis(), Vector3(0, 0.03, 0))
-		if near or int(Engine.get_process_frames() + r.name.length()) % 4 == 0:
+		if near or r.air or int(Engine.get_process_frames() + r.name.length()) % 4 == 0:
 			_pose_riding(delta, near)
 	# wheels
 	var rot: float = r.v * delta

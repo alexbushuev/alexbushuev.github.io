@@ -362,6 +362,15 @@ func open_everything() -> void:
 	persist()
 
 # ---------- end of a race: same ledger as the 2D game ----------
+const DIFF_MONEY := [0.8, 1.0, 1.2]
+
+# what any race pays at least: 12 % of the first prize for the whole distance, less for part of it, never under $10
+func min_gain(sim: Sim) -> int:
+	var road: Road = sim.road
+	var done: float = clamp((sim.me.ps - road.start_s) / max(1.0, road.finish_s - road.start_s), 0.0, 1.0)
+	if sim.end_kind == "finish":
+		done = 1.0
+	return max(10, round10(float(sim.tr.prize) * 0.12 * DIFF_MONEY[clampi(sim.diff, 0, 2)] * done))
 func finish_race(sim: Sim, kind: String) -> Dictionary:
 	var tr: Dictionary = sim.tr
 	var i: int = sim.track_i
@@ -423,21 +432,30 @@ func finish_race(sim: Sim, kind: String) -> Dictionary:
 	var total := 0
 	var add := func(label: String, v: int) -> void:
 		ledger.append([label, v])
+	# difficulty: on easy prizes and fines are 20 % smaller, on hard 20 % bigger
+	var k: float = DIFF_MONEY[clampi(sim.diff, 0, 2)]
 	if finished:
-		add.call("Приз за %d место" % place, round10(p0 * float(D.rules.place_share[place - 1])))
+		add.call("Приз за %d место" % place, round10(p0 * float(D.rules.place_share[place - 1]) * k))
 	if int(sim.stats.ko) > 0:
-		add.call("Нокауты × %d" % int(sim.stats.ko), round10(p0 * 0.06) * int(sim.stats.ko))
+		add.call("Нокауты × %d" % int(sim.stats.ko), round10(p0 * 0.06 * k) * int(sim.stats.ko))
 	if int(sim.stats.cop_ko) > 0:
-		add.call("Копы вырублены × %d" % int(sim.stats.cop_ko) if int(sim.stats.cop_ko) > 1 else "Коп вырублен", round10(p0 * 0.25) * int(sim.stats.cop_ko))
+		add.call("Копы вырублены × %d" % int(sim.stats.cop_ko) if int(sim.stats.cop_ko) > 1 else "Коп вырублен", round10(p0 * 0.25 * k) * int(sim.stats.cop_ko))
+	if int(sim.stats.get("trick_pts", 0)) > 0:
+		add.call("Трюки × %d" % int(sim.stats.tricks), round10(p0 * 0.015 * k * int(sim.stats.trick_pts)))
 	if kind == "busted":
-		add.call("Штраф", -round10(p0 * 0.3))
+		add.call("Штраф", -round10(p0 * 0.3 * k))
 	if kind == "dead":
-		add.call("Больница", -round10(p0 * 0.2))
+		add.call("Больница", -round10(p0 * 0.2 * k))
 	var dmg: float = float(me.st.dur) - me.bike_hp
 	if dmg > 0.5:
 		add.call("Ремонт", -max(10, round10(p0 * 0.25 * dmg / float(me.st.dur))))
 	for r in ledger:
 		total += int(r[1])
+	# a race never leaves you poorer: the racer's insurance tops it up to a small sum, more the further you got
+	var floor_v: int = min_gain(sim)
+	if total < floor_v:
+		add.call("Страховка гонщика", floor_v - total)
+		total = floor_v
 	data.money = max(0, int(data.money) + total)
 	persist()
 	return {"title": title, "text": text, "note": note, "bad": bad, "ledger": ledger, "total": total, "rows": rows, "finished": finished, "money": data.money, "place": place,

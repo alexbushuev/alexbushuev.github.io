@@ -6,6 +6,10 @@ var world: World
 var cam: Camera3D
 var views: Array[BikeView] = []
 var ped_views: Array[PedView] = []
+var view_of := {}           # Sim.Rider -> BikeView
+var incidents: Array[Incident] = []
+var inc_seen := {}
+var movie: Incident = null  # your own end-of-race scene, with its own camera
 var ped_of := {}          # Sim.Ped -> PedView
 var me_view: BikeView
 var car_nodes: Array[MeshInstance3D] = []
@@ -108,6 +112,7 @@ func _add_bike(r: Sim.Rider) -> BikeView:
 	add_child(v)
 	v.setup(r, sim)
 	views.append(v)
+	view_of[r] = v
 	return v
 
 func _build_cars(theme: Dictionary) -> void:
@@ -194,6 +199,9 @@ func _process(delta: float) -> void:
 	for v in views:
 		v.refresh(delta, me.ps)
 	_sync_peds(delta, me.ps)
+	_check_incidents(delta)
+	if movie != null:
+		movie.step(delta)
 	for i in sim.cars.size():
 		var c: Sim.Car = sim.cars[i]
 		var node: MeshInstance3D = car_nodes[i]
@@ -212,7 +220,58 @@ func _process(delta: float) -> void:
 		_fx(smoke, sim.rd(me).world(me.s - 0.6, me.d, 0.1))
 	_update_camera(delta)
 
+# A rival or a cop lies out of the race near you: the police come for the arrested, the ambulance for the rest.
+# Only near you, and no more than two at once: further off nobody would see it.
+func _check_incidents(delta: float) -> void:
+	for f in sim.foes:
+		if inc_seen.has(f):
+			continue
+		var lying: bool = f.state == Sim.DOWN and (f.out or f.is_cop) and f.run_phase == 0 and f.lie_t > 0.6 and not f.gone
+		if not lying:
+			continue
+		var ahead: float = f.ps - sim.me.ps
+		if ahead < -100.0:
+			inc_seen[f] = true
+			continue
+		if ahead > 300.0 or incidents.size() >= 2 or movie != null:
+			continue
+		inc_seen[f] = true
+		var inc := Incident.new()
+		add_child(inc)
+		inc.setup("arrest" if f.arrested else "medic", sim, f)
+		view_of[f].hide_rider = true
+		incidents.append(inc)
+	for i in range(incidents.size() - 1, -1, -1):
+		var inc: Incident = incidents[i]
+		inc.step(delta)
+		if inc.done or inc.r.ps < sim.me.ps - 400.0:
+			if not inc.done:
+				sim.clear_body(inc.r, inc.side)
+			incidents.remove_at(i)
+			inc.queue_free()
+
+# your end of the race as a little film: the scene plays, the camera circles it
+func start_movie(kind: String) -> Incident:
+	for inc in incidents:
+		inc.visible = abs(inc.r.ps - sim.me.ps) < 60.0
+	var m := Incident.new()
+	add_child(m)
+	m.setup(kind, sim, sim.me, true)
+	me_view.hide_rider = true
+	movie = m
+	return m
+
+func _movie_camera(delta: float) -> void:
+	var m := movie
+	var ang: float = atan2(m.cam_dir.x, m.cam_dir.z) + 0.35 - 0.07 * m.t
+	var p: Vector3 = m.cam_target + Vector3(sin(ang), 0.0, cos(ang)) * m.cam_r + Vector3.UP * m.cam_h
+	cam.look_at_from_position(p, m.cam_target, Vector3.UP)
+	cam.fov = 50.0
+
 func _update_camera(delta: float) -> void:
+	if movie != null:
+		_movie_camera(delta)
+		return
 	var me := sim.me
 	var pct: float = me.v / max(1.0, me.top)
 	var falling := me.state == Sim.DOWN
@@ -244,8 +303,8 @@ func _update_camera(delta: float) -> void:
 	var want_roll: float = -me.lean * 0.08
 	cam_roll += (want_roll - cam_roll) * min(1.0, delta * 5.0)
 	if debug_close:
-		var c0: Vector3 = on.world(focus_s + 2.4, focus_d - 2.6, 1.5)
-		cam.look_at_from_position(c0, on.world(focus_s, focus_d, 0.8), Vector3.UP)
+		var c0: Vector3 = on.world(focus_s + 2.4, focus_d - 2.6, 1.5 + me.air_h)
+		cam.look_at_from_position(c0, on.world(focus_s, focus_d, 0.8 + me.air_h), Vector3.UP)
 		cam.fov = 45.0
 		return
 	cam.look_at_from_position(cp, lp, Vector3.UP)

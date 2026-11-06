@@ -2,7 +2,7 @@ extends Node
 # Screens: menu, garage, shop, bar, start screen, race, result.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 10
+const BUILD_NO := 11
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -31,6 +31,9 @@ var quality := 1.0
 var quality_max := -1.0
 var auto_mode := ""     # command line: screenshot tests
 var settings_open := false
+var film: Incident = null     # your end of the race, played as a little scene before the results
+var film_kind := ""
+var film_res: Dictionary = {}
 
 func _font(lat: String, cyr: String) -> FontFile:
 	var f: FontFile = load("res://assets/fonts/" + lat)
@@ -92,6 +95,10 @@ func _ready() -> void:
 	elif args.size() >= 3 and args[0] == "shot":
 		auto_mode = "shot"
 		_start_race_test(int(args[1]), args[2])
+	elif args.size() >= 5 and args[0] == "flow":
+		# the real end of a race, film and result screen included: flow <track> <bike> <finish|busted|dead|wrecked> <out>
+		auto_mode = "flow"
+		_flow_test(int(args[1]), args[2], args[3], args[4])
 	else:
 		_show_menu()
 
@@ -419,7 +426,7 @@ func _end_race_nodes() -> void:
 	audio.stop_all()
 
 func _toggle_pause() -> void:
-	if sim == null or not running:
+	if sim == null or not running or film != null:
 		return
 	paused = not paused
 	hud.set_active(not paused)
@@ -453,12 +460,95 @@ func _quit_to_menu() -> void:
 
 func _show_result(kind: String) -> void:
 	audio.stop_all()
+	var res := _settle(kind)
+	N.finish_bots(sim)
+	_result_screen(res)
+
+# the money and the records are settled the moment the race ends, before any scene plays
+func _settle(kind: String) -> Dictionary:
 	var res := S.finish_race(sim, kind)
 	res["time"] = sim.stats.t_finish if kind == "finish" else -1.0
 	res["cat"] = int(sim.tr.cat)
 	N.send_result(sim, kind)
+	return res
+
+# ---------- the end of your race as a little film: cheering or raging by the bike, the police, the ambulance ----------
+func _start_film(kind: String) -> void:
+	film_kind = kind
+	film_res = _settle(kind)
+	var place: int = sim.final_place
+	var scene := "rage"
+	var caption := ""
+	match kind:
+		"finish":
+			scene = "joy" if place >= 1 and place <= 3 else "rage"
+			caption = "ПОБЕДА!" if place == 1 else ("%d МЕСТО!" % place if place <= 3 else "%d МЕСТО" % place)
+		"wrecked":
+			caption = "МОТОЦИКЛ В ХЛАМ"
+		"busted":
+			scene = "arrest"
+			caption = "ЗАДЕРЖАН"
+		"dead":
+			scene = "medic"
+			caption = "В БОЛЬНИЦУ"
+	sim.me_parked = true
+	hud.visible = false
+	film = race_view.start_movie(scene)
+	film.finished.connect(_end_film)
+	audio.siren_on = scene == "arrest" or scene == "medic"
+	_film_overlay(caption)
+
+func _film_overlay(caption: String) -> void:
+	_clear_ui()
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.gui_input.connect(func(e: InputEvent) -> void:
+		if (e is InputEventMouseButton or e is InputEventScreenTouch) and e.pressed:
+			_end_film())
+	menu.add_child(root)
+	for top in [true, false]:
+		var bar := ColorRect.new()
+		bar.color = Color(0, 0, 0, 0.92)
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bar.anchor_left = 0.0
+		bar.anchor_right = 1.0
+		bar.anchor_top = 0.0 if top else 0.88
+		bar.anchor_bottom = 0.12 if top else 1.0
+		root.add_child(bar)
+		var tw := create_tween()
+		bar.modulate.a = 0.0
+		tw.tween_property(bar, "modulate:a", 1.0, 0.4)
+	var cap := _label(caption, font_big, 40, UiKit.YEL if film_kind == "finish" and sim.final_place <= 3 else Color("#ff6a5e"))
+	cap.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	cap.anchor_top = 0.0
+	cap.anchor_bottom = 0.12
+	cap.offset_top = 0
+	cap.offset_bottom = 0
+	cap.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(cap)
+	var hint := _label("Нажми, чтобы пропустить", font_small, 15, UiKit.MUTED)
+	hint.anchor_left = 0.0
+	hint.anchor_right = 1.0
+	hint.anchor_top = 0.88
+	hint.anchor_bottom = 1.0
+	hint.offset_right = -20
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(hint)
+
+func _end_film() -> void:
+	if film == null:
+		return
+	film = null
+	running = false
+	audio.stop_all()
 	N.finish_bots(sim)
-	_result_screen(res)
+	_result_screen(film_res)
 
 func _result_screen(res: Dictionary) -> void:
 	_clear_ui()
@@ -555,6 +645,9 @@ func _ledger_line(a: String, b: String, col: Color, bold := false) -> HBoxContai
 	return h
 
 func _unhandled_input(event: InputEvent) -> void:
+	if film != null and event is InputEventKey and event.pressed and not event.echo:
+		_end_film()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and running and not settings_open:
 		if S.action_of_key(event.physical_keycode) == "pause":
 			_toggle_pause()
@@ -588,8 +681,15 @@ func _process(delta: float) -> void:
 			over_kind = e[1]
 	sim.events.clear()
 	if over_kind != "":
-		running = false
-		_show_result(over_kind)
+		if (auto_mode == "" or auto_mode == "flow") and race_view != null and over_kind in ["finish", "busted", "dead", "wrecked"]:
+			_start_film(over_kind)
+		else:
+			running = false
+			_show_result(over_kind)
+			return
+	if film != null:
+		# the scene's own sound: no engine, a siren while the police or the ambulance is there
+		audio.update(delta, 0.1, false, false, false, 25.0)
 		return
 	var near := 1e9
 	for c in sim.cops:
@@ -633,6 +733,15 @@ func _run_shots() -> void:
 		return
 	if mode == "b10":
 		await _b10_shots(out)
+		return
+	if mode == "b11":
+		await _b11_shots(out)
+		return
+	if mode == "incident":
+		await _incident_shots(out)
+		return
+	if mode.begins_with("film_"):
+		await _film_shots(out, mode.substr(5))
 		return
 	var times: Array = str(args[4]).split(",")
 	var i := 0
@@ -842,6 +951,175 @@ func _tour_shots(out: String) -> void:
 			await get_tree().process_frame
 		get_viewport().get_texture().get_image().save_png("%s_%02d_%s.png" % [out, n, sp[0]])
 		n += 1
+	get_tree().quit()
+
+func _flow_test(track_i: int, bike_id: String, kind: String, out: String) -> void:
+	await _start_race_test(track_i, bike_id)
+	sim.bot = true
+	sim.bot_peace = true
+	var snap := func(n: String) -> void:
+		await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png("%s_%s.png" % [out, n])
+	for k in 240:
+		await get_tree().process_frame
+	match kind:
+		"finish":
+			sim.me.s = sim.road.finish_s - 40.0
+			sim.me.path = 0
+		"busted", "dead", "wrecked":
+			sim.me.inv = 0.0
+			if kind == "dead":
+				sim.me.hp = 1.0
+			if kind == "wrecked":
+				sim.me.bike_hp = 1.0
+			if kind == "busted":
+				sim.cops[0].state = Sim.RIDE
+				sim.cops[0].s = sim.me.s + 10.0
+			sim.crash("car", 150.0 if kind == "dead" else 40.0)
+	var t0 := Time.get_ticks_msec()
+	while film == null and Time.get_ticks_msec() - t0 < 20000:
+		await get_tree().process_frame
+	print("film started: ", film != null, " kind ", film_kind, " place ", sim.final_place, " end ", sim.end_kind)
+	if film == null:
+		get_tree().quit()
+		return
+	for k in 3:
+		var t1 := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - t1 < 1600:
+			await get_tree().process_frame
+		await snap.call("film%d" % k)
+	_end_film()
+	for k in 20:
+		await get_tree().process_frame
+	await snap.call("result")
+	print("money ", S.data.money, " ledger ", film_res.ledger)
+	get_tree().quit()
+
+# build 11: a rival arrested and one taken away by ambulance ahead of you, as you ride up to them
+func _incident_shots(out: String) -> void:
+	sim.bot_peace = true
+	for k in 300:
+		sim.step(STEP)
+	sim.events.clear()
+	var me := sim.me
+	for i in 2:
+		var f: Sim.Rider = sim.foes[i]
+		f.path = 0
+		f.state = Sim.DOWN
+		f.out = true
+		f.arrested = i == 0
+		f.run_phase = 0
+		f.lie_t = 1.0
+		f.down_dur = 1e9
+		f.v = 0.0
+		f.s = me.s + 45.0 + i * 30.0
+		f.d = 6.5 if i == 0 else -2.0
+		f.fly_s = f.s - 4.0
+		f.fly_d = f.d - 0.6
+		f.fly_y = 0.18
+		f.fly_v = 0.0
+		f.fly_vy = 0.0
+	var n := 0
+	while n < 14:
+		for k in 6:
+			me.v = min(me.v, 1.0)
+			await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png("%s_inc_%02d.png" % [out, n])
+		print("frame %d: me %.0f, incidents %d" % [n, me.s, race_view.incidents.size()])
+		n += 1
+	get_tree().quit()
+
+# build 11: the end-of-race scenes, a frame every second
+func _film_shots(out: String, scene: String) -> void:
+	sim.bot_peace = true
+	for k in 400:
+		sim.step(STEP)
+	sim.events.clear()
+	var me := sim.me
+	if scene == "arrest" or scene == "medic":
+		sim.crash("car", 120.0)
+		for k in 200:
+			sim.step(STEP)
+		me.run_phase = 0
+		me.lie_t = 1.0
+	sim.me_parked = true
+	hud.visible = false
+	var m := race_view.start_movie(scene)
+	var n := 0
+	var t0 := Time.get_ticks_msec()
+	while not m.done and n < 20:
+		await get_tree().process_frame
+		if m.t >= n * 1.0:
+			get_viewport().get_texture().get_image().save_png("%s_%s_%02d.png" % [out, scene, n])
+			n += 1
+	print("%s: %d frames, scene took %.1f s, real %d ms" % [scene, n, m.t, Time.get_ticks_msec() - t0])
+	get_tree().quit()
+
+# build 11: every trick in the air, close up, and the moods after the line
+func _b11_shots(out: String) -> void:
+	sim.bot_peace = true
+	for k in 240:
+		sim.step(STEP)
+	sim.events.clear()
+	var me := sim.me
+	var snap := func(n: String) -> void:
+		sim.events.clear()
+		await get_tree().process_frame
+		await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png("%s_%s.png" % [out, n])
+		print("%s: air %.1f m trick %s u=%.2f emote %s %.2f state %d phase %s" % [n, me.air_h, me.trick, me.trick_t / max(0.1, me.trick_len), me.emote, me.emote_t, me.state, sim.phase])
+	for f in sim.foes:
+		f.s = 1e5
+	for c in sim.cars:
+		c.s = -5000.0
+		c.v = 0.0
+		c.v0 = 0.1
+	sim.peds.clear()
+	sim._cross_i = 999
+	var kk: Dictionary = sim.road.kickers[0]
+	for trick in ["flip", "whip", "seat", "superman", "nacnac", "heel", "nohands"]:
+		me.path = 0
+		me.s = float(kk.s) - 120.0
+		me.d = 1.8
+		me.v = me.top
+		me.state = Sim.RIDE
+		me.inv = 0.0
+		me.air = false
+		race_view.cam_d = 1.8
+		var got := false
+		for k in 600:
+			me.v = max(me.v, me.top * 0.98)
+			sim.step(STEP)
+			sim.events.clear()
+			await get_tree().process_frame
+			if me.air and me.trick != trick:
+				me.trick = trick
+			if me.air and me.trick_t > me.trick_len * 0.3 and not got:
+				got = true
+				race_view.debug_close = true
+				await snap.call("t_" + trick)
+				race_view.debug_close = false
+				await snap.call("v_" + trick)
+			if got and not me.air:
+				break
+	# moods after the line
+	for mood in [["joy", 1.0], ["angry", 1.0], ["sad", 0.8]]:
+		me.s = 900.0
+		me.d = 1.8
+		me.v = 8.0
+		me.air = false
+		me.emote = mood[0]
+		me.emote_k = mood[1]
+		me.emote_t = 0.0
+		for k in 20:
+			me.v = 8.0
+			sim.step(STEP)
+			await get_tree().process_frame
+		me.emote_t = 1.3
+		me.inv = 0.0
+		race_view.debug_close = true
+		await snap.call("e_" + mood[0])
+		race_view.debug_close = false
 	get_tree().quit()
 
 # build 10: a jump off a crest, people on a crossing, a slope sign, a rival knocked down on foot

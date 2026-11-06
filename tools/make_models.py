@@ -480,6 +480,35 @@ def make_cars():
         for s in (-1, 1):
             k.disc((s * 1.08, sy, .5), .5, .3, RUBBER, g, verts=10)
     k.join(g, g)
+    # police car: a white sedan with a blue stripe and a light bar; the lights themselves are drawn by the game
+    g = 'police'
+    WHITE_C, BLUE_C, RED_C = hexc('#ecebe4'), hexc('#1f4fb8'), hexc('#d9232e')
+    k.box((0, 0, .58), (1.8, 4.4, .52), WHITE_C, g)
+    k.box((0, -.25, 1.08), (1.56, 2.1, .50), win, g)
+    k.box((0, -.25, 1.355), (1.5, 1.8, .05), WHITE_C, g)
+    for s in (-1, 1):
+        k.box((s * .905, 0, .62), (.02, 4.3, .18), BLUE_C, g)
+        k.box((s * .5, 2.2, .68), (.32, .03, .14), LAMP, g)
+        k.box((s * .55, -2.2, .72), (.34, .03, .13), TAIL, g)
+    k.box((0, -.25, 1.43), (1.25, .32, .1), BLACK, g)
+    k.box((0, 2.21, .46), (1.4, .03, .12), BLACK, g)
+    k.box((0, -2.21, .46), (1.4, .03, .12), BLACK, g)
+    wheels(g, .85, 1.38)
+    k.join(g, g)
+    # ambulance: a white van with a red stripe, a light bar over the cab
+    g = 'ambulance'
+    k.box((0, 0, 1.22), (2.0, 5.2, 1.84), WHITE_C, g)
+    k.box((0, 2.0, 1.62), (1.86, 1.25, .66), win, g)
+    for s in (-1, 1):
+        k.box((s * 1.005, -.2, 1.0), (.02, 4.6, .24), RED_C, g)
+        k.box((s * .7, 2.6, .78), (.3, .03, .2), LAMP, g)
+        k.box((s * .84, -2.6, 1.02), (.18, .03, .4), TAIL, g)
+    k.box((0, -2.61, 1.5), (1.4, .02, .9), hexc('#dcdad2'), g)
+    k.box((0, -2.62, 1.55), (.5, .01, .14), RED_C, g)
+    k.box((0, -2.62, 1.55), (.14, .01, .5), RED_C, g)
+    k.box((0, 1.7, 2.2), (1.5, .3, .12), BLACK, g)
+    wheels(g, .95, 1.7)
+    k.join(g, g)
     return export('cars', mat)
 
 

@@ -65,6 +65,26 @@ func _ready() -> void:
 				if abs(p.d) < Road.EDGE:
 					on_road_when_passed += 1
 	check(seen >= 4, "people turn up at the crossings", "%d on %d crossings" % [seen, sim.road.crossings.size()])
+	# at the line: the first three are happy, the rest sulk or rage by character
+	var sm := race(2, "shershen")
+	var moods := {}
+	for i in sm.foes.size():
+		var f: Sim.Rider = sm.foes[i]
+		if f.is_cop:
+			continue
+		f.s = sm.road.finish_s - 30.0 - i * 6.0
+		f.d = 1.8 if i % 2 == 0 else 5.4
+		f.v = f.top * 0.8
+	for k in 600:
+		sm.step(1.0 / 60.0)
+		for f in sm.foes:
+			if f.finished and f.emote != "" and not moods.has(f.name):
+				moods[f.name] = "%d %s" % [f.place, f.emote]
+	var ok_m := moods.size() >= 5
+	for f in sm.foes:
+		if f.finished and f.place >= 1 and f.place <= 3 and moods.get(f.name, "").find("joy") < 0:
+			ok_m = false
+	check(ok_m, "rivals at the line show how they feel", str(moods))
 	check(on_road_when_passed >= 1, "some are on the road when you get there", "%d" % on_road_when_passed)
 	print("   bot hit %d light, %d heavy; finished: %s" % [hit_light, hit_heavy, sim.end_kind])
 	# ---- a light one: half the speed gone ----

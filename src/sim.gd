@@ -87,6 +87,16 @@ class Rider:
 	var air_h := 0.0
 	var air_t := 0.0
 	var air_s0 := 0.0
+	var trick := ""             # what he does in the air: the longer the flight, the bigger the trick
+	var trick_t := 0.0
+	var trick_len := 0.0
+	var arrested := false       # the police took him
+	var calm_t := 0.0           # a cop who just let someone go: he sits back for a while
+	var gone := false           # taken away by the police or the ambulance: no body on the road any more
+	var emote := ""             # after the line: "joy", "sad", "angry"
+	var emote_t := 0.0
+	var emote_k := 0.5          # how strongly he shows it
+	var place := 0
 	# rider's own flight while the bike slides
 	var fly_s := 0.0
 	var fly_d := 0.0
@@ -196,7 +206,7 @@ var end_kind := ""
 var end_t := 0.0
 var next_atk := 0.0
 var say_at := 0.0
-var stats := {"ko": 0, "cop_ko": 0, "shifts": 0, "t_finish": 0.0}
+var stats := {"ko": 0, "cop_ko": 0, "shifts": 0, "t_finish": 0.0, "tricks": 0, "trick_pts": 0}
 var events: Array = []    # for sound and effects, drained by the view each frame
 var banner := ""
 var banner_bad := false
@@ -204,6 +214,7 @@ var say_txt := ""
 var rng := RandomNumberGenerator.new()
 var bot_branch := ""      # test bot at a fork: "" stays on the main road, "take" takes every side road
 var solo := false         # the race goes on without you: rivals ride their own race, nobody waits or catches up
+var me_parked := false    # your race is over and the end scene has your bike: the sim leaves you alone
 var diff := 1             # 0 easy: rivals ahead ease off, you take 70 % damage; 1 as designed; 2 hard: rivals behind push, you take 130 %
 var dmg_k := 1.0
 
@@ -462,7 +473,7 @@ func _update_car(c: Car, dt: float) -> void:
 		obs_v = abs(l.v)
 	var reach: float = c.hw + 1.0
 	for r in riders:
-		if r.state == WAIT or r.path != 0:
+		if r.state == WAIT or r.path != 0 or r.gone or (r.out and r.down_t > 20.0):
 			continue
 		var fallen: bool = r.state == DOWN
 		var rv: float = r.v
@@ -804,6 +815,7 @@ func _launch(r: Rider, side: int) -> void:
 	r.fly_vy = rng.randf_range(2.8, 4.2) + (r.air_vy - r.v * rd(r).grade_at(r.s) if r.air else 0.0)
 	r.air = false
 	r.air_h = 0.0
+	r.trick = ""
 	r.fly_v = r.v * 0.92
 	r.fly_vd = side * rng.randf_range(0.6, 2.2)
 	r.spin = rng.randf_range(4.0, 9.0) * (1.0 if rng.randf() < 0.5 else -1.0)
@@ -836,19 +848,74 @@ func hurt_me(dmg: float, side: int) -> void:
 		me.hp = 0.0
 		crash("knock")
 
+# ---------- tricks ----------
+const TRICKS := {"nohands": ["Без рук", 1], "nacnac": ["Нак-нак", 1], "superman": ["Супермен", 2], "heel": ["Ноги в стороны", 2],
+	"seat": ["Стойка на сиденье", 3], "whip": ["Байк вбок", 3], "flip": ["Сальто", 5]}
+
+# The longer he is going to be in the air, the bigger the trick. The careful ones keep it small.
+func pick_trick(r: Rider, flight: float) -> String:
+	var tier := 0
+	if flight >= 1.2:
+		tier = 4
+	elif flight >= 0.9:
+		tier = 3
+	elif flight >= 0.6:
+		tier = 2
+	elif flight >= 0.38:
+		tier = 1
+	if not r.is_me:
+		tier = min(tier, {"coward": 1, "calm": 2, "blocker": 3}.get(r.style, 4))
+		if r.is_cop:
+			tier = min(tier, 1)
+	match tier:
+		1:
+			return "nohands" if rng.randf() < 0.5 else "nacnac"
+		2:
+			return "superman" if rng.randf() < 0.6 else "heel"
+		3:
+			return "seat" if rng.randf() < 0.5 else "whip"
+		4:
+			return "flip"
+	return ""
+
+# After the line: the first three are happy, the rest show it each in his own way, some sulk, some rage
+const MOODS := {"maniac": ["angry", 1.0], "brawler": ["angry", 0.9], "thief": ["angry", 0.6], "blocker": ["angry", 0.75],
+	"racer": ["angry", 0.5], "calm": ["sad", 0.5], "coward": ["sad", 0.8]}
+
+func set_emote(r: Rider, place_v: int) -> void:
+	r.emote_t = 0.0
+	if place_v >= 1 and place_v <= 3:
+		r.emote = "joy"
+		r.emote_k = [1.0, 0.8, 0.6][place_v - 1]
+		return
+	var mood: Array = ["angry", 0.7] if r.is_me else MOODS.get(r.style, ["angry", 0.6])
+	r.emote = mood[0]
+	r.emote_k = clamp(float(mood[1]) * (0.7 + 0.5 * r.aggr), 0.3, 1.0) if not r.is_me else float(mood[1])
+
+func trick_name(tr_id: String) -> String:
+	return TRICKS[tr_id][0] if TRICKS.has(tr_id) else ""
+
 # coming down: soft is nothing, hard costs speed and the bike, too hard is a fall
 func _land(v_in: float) -> void:
 	var m := me
 	var dist: float = m.s - m.air_s0
+	var done_trick: String = m.trick
+	m.trick = ""
 	if phase != "race":
 		return
 	if v_in > 9.5:
 		crash("landing", dial(m, m.v))
 		return
+	if done_trick != "":
+		stats.tricks += 1
+		stats.trick_pts += int(TRICKS[done_trick][1])
+		ev("trick", done_trick)
 	if v_in > 6.5:
 		m.v *= 1.0 - min(0.2, 0.04 * (v_in - 6.5))
 		m.bike_hp = max(1.0, m.bike_hp - (v_in - 6.5) * 2.5 * dmg_k)
-		show_banner("Жёсткая посадка", true)
+		show_banner((trick_name(done_trick) + "! Жёстко") if done_trick != "" else "Жёсткая посадка", true)
+	elif done_trick != "":
+		show_banner("%s! %d м" % [trick_name(done_trick), int(round(dist))])
 	elif dist > 15.0:
 		show_banner("Прыжок %d м" % int(round(dist)))
 	ev("land", v_in)
@@ -994,11 +1061,19 @@ func _cop_hit(f: Rider, tg: Rider, w: Dictionary, side: int) -> void:
 		ev("hit", tg, f.weapon)
 	if tg.hp <= 0.0:
 		ko_foe(tg, side, false, "")
-		# a rival the police knock off the bike stays with the police
-		tg.out = true
-		tg.down_dur = 1e9
-		if near_me:
-			show_banner("Коп взял: " + tg.name)
+		# knocked off by the police: about half the time he stays with them, otherwise he scrambles back on and the cop,
+		# busy with his report, lets him go for a while
+		if tg.out or rng.randf() < 0.45:
+			tg.out = true
+			tg.arrested = true
+			tg.down_dur = 1e9
+			if near_me:
+				show_banner("Коп взял: " + tg.name)
+		else:
+			f.calm_t = 12.0
+			f.target = null
+			if near_me:
+				show_banner("%s ушёл от копа" % tg.name)
 
 func _say(f: Rider, chance: float) -> void:
 	if f.lines.is_empty() or rng.randf() > chance or t < say_at:
@@ -1007,6 +1082,11 @@ func _say(f: Rider, chance: float) -> void:
 	var i: int = rng.randi() % f.lines.size()
 	say_txt = f.name + ": " + str(f.lines[i])
 	ev("say", say_txt, f.voice_id, i)
+
+# the police or the ambulance took him: nothing lies on the road any more, traffic goes by
+func clear_body(r: Rider, side_v: float) -> void:
+	r.gone = true
+	r.fly_d = side_v * 40.0
 
 func live_place() -> int:
 	var p := 1
@@ -1115,10 +1195,15 @@ func _vertical(r: Rider, dt: float, s_prev: float) -> float:
 		r.air_t = tt
 		r.air_s0 = sj
 		r.air_h = r.air_y - on.height_at(r.s)
+		var flight: float = on.flight_time(r.s, r.air_y, r.air_vy, r.v)
+		r.trick = pick_trick(r, flight)
+		r.trick_len = max(0.2, flight - 0.3)
+		r.trick_t = -0.1
 		if r.is_me:
 			ev("air")
 		return -1.0
 	r.air_t += dt
+	r.trick_t += dt
 	r.air_vy -= G * dt
 	r.air_y += r.air_vy * dt
 	var ground: float = on.height_at(r.s)
@@ -1236,6 +1321,8 @@ func _bot_input() -> void:
 				inp.hand = true
 
 func _update_me(dt: float) -> void:
+	if me_parked:
+		return
 	var m := me
 	var top := m.top
 	var pct: float = m.v / top
@@ -1366,11 +1453,15 @@ func _update_me(dt: float) -> void:
 				ev("up")
 	_update_gear(dt, m.state == RIDE and not stopping and m.gas_on)
 	_calc_ps(m)
+	if m.emote != "":
+		m.emote_t += dt
 	if phase == "race" and m.path == 0 and m.s >= road.finish_s:
 		final_place = live_place()
+		m.place = final_place
+		set_emote(m, final_place)
 		stats.t_finish = t
 		end_kind = "finish"
-		end_t = 2.2
+		end_t = 3.6
 		phase = "finish"
 		show_banner("Первый!" if final_place == 1 else "Финиш")
 		ev("siren", false)
@@ -1417,6 +1508,12 @@ func _update_foe(f: Rider, dt: float) -> void:
 	var tg: Rider = m
 	if f.is_cop:
 		f.retarget_t -= dt
+		if f.calm_t > 0.0:
+			f.calm_t -= dt
+			f.target = null
+			f.v = max(0.0, f.v - v_top * 0.3 * dt)
+			f.s += f.v * dt
+			return
 		if f.retarget_t <= 0.0 or f.target == null or f.target.state != RIDE:
 			f.retarget_t = 0.4
 			_pick_target(f)
@@ -1555,6 +1652,8 @@ func _update_foe(f: Rider, dt: float) -> void:
 	_update_path(f, prev_s)
 	# onto or off a side road s jumps to another road's count: no crest to look for in between
 	var landed: float = _vertical(f, dt, prev_s if f.path == path0 else f.s)
+	if landed >= 0.0:
+		f.trick = ""
 	if landed > 9.0 and (not f.is_cop or t - f.hit_t < 2.5):
 		ko_foe(f, 1 if f.d >= 0.0 else -1, false, "landing")
 		return
@@ -1630,10 +1729,16 @@ func _update_foe(f: Rider, dt: float) -> void:
 					next_atk = t + 0.8
 				f.attack = {"t": 0.0, "side": 1 if tg.d >= f.d else -1, "done": false, "weapon": f.weapon, "type": "hand"}
 				f.cd = rng.randf_range(1.3, 2.6) * (1.6 - f.aggr * 0.6)
+	if f.emote != "":
+		f.emote_t += dt
+		if f.emote_t > 6.5:
+			f.emote = ""
 	if not f.is_cop and not f.finished and f.path == 0 and f.s >= road.finish_s:
 		f.finished = true
 		f.finish_t = t
 		order.append(f)
+		f.place = order.size() + (1 if (end_kind == "finish" and stats.t_finish > 0.0 and stats.t_finish <= t) else 0)
+		set_emote(f, f.place)
 
 # ---------- people on foot: pedestrians, and riders running back to their bikes ----------
 # People turn up at the crossings ahead of you, timed so that some are on the road when you get there.

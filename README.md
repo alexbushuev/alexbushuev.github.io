@@ -25,7 +25,7 @@
     godot --headless --path . res://tests/steer_test.tscn     # замеры руля
     godot --headless --path . res://tests/settings_test.tscn  # уровни мотора, кнопки, раскладка телефона
     godot --headless --path . res://tests/hill_test.tscn      # подъёмы и спуски, трамплины, скорость байков на уклоне
-    godot --headless --path . res://tests/foot_test.tscn      # пешеходы, сбить бегущего к байку, сложность
+    godot --headless --path . res://tests/foot_test.tscn      # пешеходы, сбить бегущего к байку, сложность, эмоции на финише
 
 Реальный звук: `AUDIO_MARKS=/tmp/m.txt xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 320x180 --write-movie /tmp/a.avi res://tests/audio_probe.tscn`, потом `python3 tools/audio_measure.py /tmp/a.avi /tmp/m.txt`.
 
@@ -65,4 +65,6 @@
 
 Проверка на своей машине: `GAZ_DB=/tmp/t.db GAZ_PORT=8788 python3 server/gaz_api.py`, `python3 tools/dev_server.py 8123 http://127.0.0.1:8788` (сайт из dist/ плюс API, как Caddy), `GAZ_API=http://127.0.0.1:8788/gaz-api godot --headless --path . res://tests/net_test.tscn`.
 
-Другие тесты: `tests/branch_test` (развилки и выигрыш срезки по времени), `tests/build_time` (сколько строится трасса), `tests/geo_dump` (точки трассы для картинки), режим снимков `-- shot <трасса> <байк> <папка> 1 tour` (тоннели, мосты, развилки) и `-- shot <трасса> <байк> <папка> 0 b10` (прыжок, знаки уклона, переход с пешеходами).
+Другие тесты: `tests/branch_test` (развилки и выигрыш срезки по времени), `tests/build_time` (сколько строится трасса), `tests/geo_dump` (точки трассы для картинки), режим снимков `-- shot <трасса> <байк> <папка> 1 tour` (тоннели, мосты, развилки) и `-- shot <трасса> <байк> <папка> 0 b10` (прыжок, знаки уклона, переход с пешеходами), `... 0 b11` (все трюки и эмоции крупно), `... 0 film_arrest|film_medic|film_joy|film_rage` (сценки конца гонки), `... 0 incident` (арест и скорая у соперников). Весь конец гонки с фильмом и экраном итогов: `-- flow <трасса> <байк> finish|busted|dead|wrecked <файл>`.
+
+Сценки (`src/incident.gd`, `src/actor_view.gd`): полицейская машина и скорая приезжают к выбывшим соперникам рядом с тобой, а в конце твоей гонки играется короткий фильм: радость с шампанским, злость с броском шлема, арест или скорая. Деньги и рекорды записываются до фильма, фильм пропускается нажатием.

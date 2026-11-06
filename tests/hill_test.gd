@@ -72,5 +72,26 @@ func _ready() -> void:
 				print("   hop at %.0f m, grade %.3f -> %.3f" % [s, road.grade_at(s), road.grade_at(s + 2.0)])
 			s += 2.0
 		check(hops == 0, "%s: %d plain hilltops throw you at 90%% league speed" % [tr.id, hops])
+	# a trick off the biggest crest of the ring, flat out: the longer the flight, the bigger the trick
+	var sim2 := Sim.new()
+	sim2.setup(5, "grom", {}, 2, 2, 0, 0, 1)
+	sim2.phase = "race"
+	sim2.t = 5.0
+	for c in sim2.cars:
+		c.s = -5000.0
+	var kk2: Dictionary = sim2.road.kickers[0]
+	sim2.me.s = float(kk2.s) - 150.0
+	sim2.me.d = 1.8
+	sim2.me.v = sim2.me.top
+	sim2.inp = {"steer": 0.0, "gas": true, "brake": false, "hand": false, "kick": false}
+	var seen := ""
+	for i in 600:
+		sim2.step(1.0 / 60.0)
+		if sim2.me.air and sim2.me.trick != "":
+			seen = sim2.me.trick
+		if seen != "" and not sim2.me.air:
+			break
+	check(seen != "" and int(sim2.stats.tricks) == 1 and int(sim2.stats.trick_pts) >= 2, "a long jump comes with a trick (%s, %d points)" % [seen, int(sim2.stats.trick_pts)])
+	check(sim2.pick_trick(sim2.me, 0.3) == "" and sim2.pick_trick(sim2.me, 1.3) == "flip", "short hops get nothing, long flights a flip")
 	print("FAILS: %d" % fails)
 	get_tree().quit()

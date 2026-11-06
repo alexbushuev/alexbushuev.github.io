@@ -463,6 +463,19 @@ func simulate_jump(s_from: float, v: float) -> Array:
 		s = s2
 	return [false, s, 0.0, 0.0]
 
+# how long something already in the air stays there, seconds
+func flight_time(s: float, y: float, vy: float, v: float) -> float:
+	var dt := 1.0 / 60.0
+	var t := 0.0
+	while t < 5.0:
+		vy -= 9.81 * dt
+		y += vy * dt
+		s += v * dt
+		t += dt
+		if y <= height_at(s):
+			return t
+	return t
+
 # the fastest a crest can be taken and still land on the wheels
 func safe_jump_speed(s_crest: float) -> float:
 	var lo := 10.0

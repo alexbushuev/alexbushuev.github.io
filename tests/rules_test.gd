@@ -117,7 +117,7 @@ func _cop_wakes_for_rival() -> void:
 	var out_at := -1.0
 	var tt := 0.0
 	var v_me := 0.0
-	while tt < 90.0 and out_at < 0.0:
+	while tt < 300.0 and out_at < 0.0:
 		sim.me.v = v_me
 		sim.step(1.0 / 60.0)
 		tt += 1.0 / 60.0
@@ -281,12 +281,38 @@ func _ledger() -> void:
 	var s2 := Sim.new()
 	s2.setup(0, "strek", {}, 0, 0, 0, 0, 1)
 	var r2 := S.finish_race(s2, "busted")
-	_ok("arrest fine 30% of prize", int(r2.total) == -120 and r2.bad, str(r2.ledger))
+	_ok("arrest fine 30% of prize", _line(r2, "Штраф") == -120 and r2.bad, str(r2.ledger))
+	_ok("insurance: arrested at the start still gets $10", int(r2.total) == 10 and int(S.data.money) == 1010, str(r2.ledger))
 	var s3 := Sim.new()
 	S.data.money = 50
 	s3.setup(0, "strek", {}, 0, 0, 0, 0, 1)
 	var r3 := S.finish_race(s3, "dead")
-	_ok("hospital can't take you below zero", int(r3.total) == -80 and int(S.data.money) == 0, str(r3.ledger))
+	_ok("hospital 20%, and you still come out ahead", _line(r3, "Больница") == -80 and int(r3.total) == 10 and int(S.data.money) == 60, str(r3.ledger))
+	# difficulty: easy -20 % on prizes and fines, hard +20 %; insurance grows with the distance covered
+	var s4 := Sim.new()
+	S.data.money = 0
+	s4.setup(0, "strek", {}, 0, 0, 0, 0, 1, {"diff": 0})
+	s4.me.ps = s4.road.finish_s - 1.0
+	var r4 := S.finish_race(s4, "busted")
+	_ok("easy: fine 80 %, insurance 12 % x 80 % near the line", _line(r4, "Штраф") == -100 and int(r4.total) == 40, str(r4.ledger))
+	var s5 := Sim.new()
+	s5.setup(0, "strek", {}, 0, 0, 0, 0, 1, {"diff": 2})
+	s5.final_place = 1
+	s5.end_kind = "finish"
+	var r5 := S.finish_race(s5, "finish")
+	_ok("hard: first prize 120 %", _line(r5, "Приз за 1 место") == 480, str(r5.ledger))
+	var s6 := Sim.new()
+	s6.setup(0, "strek", {}, 0, 0, 0, 0, 1)
+	s6.final_place = 8
+	s6.end_kind = "finish"
+	var r6 := S.finish_race(s6, "finish")
+	_ok("last place still pays the insurance minimum", int(r6.total) == 50, str(r6.ledger))
+
+func _line(r: Dictionary, label: String) -> int:
+	for l in r.ledger:
+		if l[0] == label:
+			return int(l[1])
+	return 0
 
 func _weapon_stock() -> void:
 	S.reset_for_test()
