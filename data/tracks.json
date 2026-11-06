@@ -1,0 +1,395 @@
+[
+ {
+  "id": "dachi",
+  "cat": 0,
+  "name": "Дачи",
+  "kmh": 80,
+  "curve": 3.2,
+  "hills": 0.35,
+  "hillH": 12,
+  "sec": 70,
+  "centrif": 0.12,
+  "cars": 14,
+  "foeHp": 36,
+  "foeDmg": 0.8,
+  "copHp": 70,
+  "cops": [
+   0.45
+  ],
+  "copChase": 22,
+  "seed": 11,
+  "theme": 0,
+  "prize": 400,
+  "arms": [
+   "none",
+   "chain",
+   "none",
+   "none",
+   "none",
+   "none",
+   "baton"
+  ],
+  "top": 5180,
+  "ck": 0.204,
+  "roster": [
+   [
+    "kuz",
+    "shmel",
+    "chain"
+   ],
+   [
+    "ded",
+    "shmel"
+   ],
+   [
+    "shnyr",
+    "strek"
+   ],
+   [
+    "valera",
+    "strek"
+   ],
+   [
+    "siply",
+    "strek"
+   ],
+   [
+    "pelmen",
+    "strek"
+   ],
+   [
+    "zina",
+    "strek"
+   ]
+  ]
+ },
+ {
+  "id": "rice",
+  "cat": 0,
+  "name": "Рисовые поля",
+  "kmh": 100,
+  "curve": 3.6,
+  "hills": 0.2,
+  "hillH": 8,
+  "sec": 72,
+  "centrif": 0.125,
+  "cars": 16,
+  "foeHp": 40,
+  "foeDmg": 0.85,
+  "copHp": 78,
+  "cops": [
+   0.4
+  ],
+  "copChase": 24,
+  "seed": 17,
+  "theme": 5,
+  "prize": 800,
+  "arms": [
+   "baton",
+   "none",
+   "chain",
+   "none",
+   "none",
+   "baton",
+   "none"
+  ],
+  "top": 5800,
+  "ck": 0.2125,
+  "roster": [
+   [
+    "hrom",
+    "gekkon"
+   ],
+   [
+    "karb",
+    "gekkon"
+   ],
+   [
+    "valera",
+    "gekkon"
+   ],
+   [
+    "babai",
+    "buivol"
+   ],
+   [
+    "shnyr",
+    "shmel"
+   ],
+   [
+    "mazut",
+    "shmel"
+   ],
+   [
+    "zina",
+    "shmel"
+   ]
+  ]
+ },
+ {
+  "id": "rayon",
+  "cat": 1,
+  "name": "Район",
+  "kmh": 150,
+  "curve": 3.8,
+  "hills": 0.4,
+  "hillH": 16,
+  "sec": 76,
+  "centrif": 0.135,
+  "cars": 20,
+  "foeHp": 46,
+  "foeDmg": 0.92,
+  "copHp": 88,
+  "cops": [
+   0.4
+  ],
+  "copChase": 26,
+  "seed": 23,
+  "theme": 1,
+  "prize": 1400,
+  "arms": [
+   "chain",
+   "none",
+   "baton",
+   "none",
+   "none",
+   "baton",
+   "none"
+  ],
+  "top": 7350,
+  "ck": 0.29700000000000004,
+  "roster": [
+   [
+    "gvozd",
+    "shershen"
+   ],
+   [
+    "babai",
+    "kobra"
+   ],
+   [
+    "svarshik",
+    "brodyaga"
+   ],
+   [
+    "ryzhiy",
+    "shershen"
+   ],
+   [
+    "valera",
+    "shershen"
+   ],
+   [
+    "pelmen",
+    "shershen"
+   ],
+   [
+    "siply",
+    "shershen",
+    "baton"
+   ]
+  ]
+ },
+ {
+  "id": "prom",
+  "cat": 1,
+  "name": "Промзона",
+  "kmh": 180,
+  "curve": 4.1,
+  "hills": 0.45,
+  "hillH": 20,
+  "sec": 80,
+  "centrif": 0.145,
+  "cars": 22,
+  "foeHp": 52,
+  "foeDmg": 1,
+  "copHp": 100,
+  "cops": [
+   0.3,
+   0.7
+  ],
+  "copChase": 28,
+  "seed": 37,
+  "theme": 2,
+  "prize": 2200,
+  "arms": [
+   "chain",
+   "baton",
+   "none",
+   "chain",
+   "none",
+   "baton",
+   "none"
+  ],
+  "top": 8280,
+  "ck": 0.319,
+  "roster": [
+   [
+    "hrom",
+    "volk"
+   ],
+   [
+    "mazut",
+    "karavan"
+   ],
+   [
+    "babai",
+    "karavan"
+   ],
+   [
+    "svarshik",
+    "volk"
+   ],
+   [
+    "karb",
+    "kobra"
+   ],
+   [
+    "shnyr",
+    "kobra"
+   ],
+   [
+    "valera",
+    "kobra",
+    "baton"
+   ]
+  ]
+ },
+ {
+  "id": "trassa",
+  "cat": 2,
+  "name": "Трасса",
+  "kmh": 240,
+  "curve": 4.5,
+  "hills": 0.55,
+  "hillH": 28,
+  "sec": 85,
+  "centrif": 0.16,
+  "cars": 26,
+  "foeHp": 60,
+  "foeDmg": 1.15,
+  "copHp": 115,
+  "cops": [
+   0.3,
+   0.7
+  ],
+  "copChase": 30,
+  "seed": 41,
+  "theme": 3,
+  "prize": 3600,
+  "arms": [
+   "chain",
+   "chain",
+   "baton",
+   "none",
+   "baton",
+   "none",
+   "baton"
+  ],
+  "top": 10140,
+  "ck": 0.43200000000000005,
+  "roster": [
+   [
+    "gvozd",
+    "sapsan"
+   ],
+   [
+    "karb",
+    "osa",
+    "chain"
+   ],
+   [
+    "hrom",
+    "sapsan",
+    "baton"
+   ],
+   [
+    "ryzhiy",
+    "sapsan",
+    "chain"
+   ],
+   [
+    "valera",
+    "sapsan",
+    "baton"
+   ],
+   [
+    "siply",
+    "sapsan"
+   ],
+   [
+    "mazut",
+    "sapsan"
+   ]
+  ]
+ },
+ {
+  "id": "ring",
+  "cat": 2,
+  "name": "Кольцо",
+  "kmh": 290,
+  "curve": 5,
+  "hills": 0.5,
+  "hillH": 30,
+  "sec": 90,
+  "centrif": 0.17,
+  "cars": 30,
+  "foeHp": 70,
+  "foeDmg": 1.3,
+  "copHp": 130,
+  "cops": [
+   0.25,
+   0.55,
+   0.8
+  ],
+  "copChase": 32,
+  "seed": 59,
+  "theme": 4,
+  "prize": 6000,
+  "arms": [
+   "chain",
+   "chain",
+   "baton",
+   "chain",
+   "baton",
+   "none",
+   "baton"
+  ],
+  "top": 11690,
+  "ck": 0.4590000000000001,
+  "roster": [
+   [
+    "gvozd",
+    "grom"
+   ],
+   [
+    "karb",
+    "tsunami",
+    "chain"
+   ],
+   [
+    "hrom",
+    "grom",
+    "baton"
+   ],
+   [
+    "babai",
+    "tsunami"
+   ],
+   [
+    "ryzhiy",
+    "grom",
+    "baton"
+   ],
+   [
+    "valera",
+    "grom",
+    "chain"
+   ],
+   [
+    "mazut",
+    "grom"
+   ]
+  ]
+ }
+]

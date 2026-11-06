@@ -1,0 +1,66 @@
+{
+ "fall_k": 1.3,
+ "place_share": [
+  1,
+  0.6,
+  0.4,
+  0.2,
+  0.12,
+  0.08,
+  0.05,
+  0.03
+ ],
+ "upgrade_cost": [
+  0.08,
+  0.16,
+  0.3,
+  0.5
+ ],
+ "max_level": 4,
+ "gear_cost": {
+  "glove": [
+   30,
+   80,
+   200,
+   500
+  ],
+  "boot": [
+   40,
+   100,
+   250,
+   600
+  ],
+  "baton": 40,
+  "chain": 60
+ },
+ "keys": {
+  "gas": [
+   "ArrowUp",
+   "KeyW"
+  ],
+  "left": [
+   "ArrowLeft",
+   "KeyA"
+  ],
+  "right": [
+   "ArrowRight",
+   "KeyD"
+  ],
+  "brake": [
+   "ArrowDown",
+   "KeyS"
+  ],
+  "hand": [
+   "KeyZ",
+   "KeyJ"
+  ],
+  "kick": [
+   "KeyX",
+   "KeyK"
+  ],
+  "pause": [
+   "Escape",
+   "KeyP"
+  ]
+ }
+}

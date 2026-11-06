@@ -1,0 +1,63 @@
+[
+ {
+  "name": "Скутеры",
+  "full": "Лига скутеров",
+  "range": "до 200cc",
+  "sign": "200",
+  "arts": [
+   "moped",
+   "underbone",
+   "scooter",
+   "maxi"
+  ],
+  "cop": "underbone",
+  "gears": 3,
+  "shift": 0.18,
+  "cyl": 1,
+  "idle": 1900,
+  "red": 10000,
+  "fLo": 700,
+  "fHi": 1900,
+  "vol": 0.19
+ },
+ {
+  "name": "Городские",
+  "full": "Городская лига",
+  "range": "от 200 до 600cc",
+  "sign": "600",
+  "arts": [
+   "naked",
+   "street",
+   "scrambler",
+   "tourer"
+  ],
+  "cop": "street",
+  "gears": 5,
+  "shift": 0.12,
+  "cyl": 2,
+  "idle": 1500,
+  "red": 11500,
+  "fLo": 650,
+  "fHi": 2600,
+  "vol": 0.2
+ },
+ {
+  "name": "Спорт",
+  "full": "Лига спортбайков",
+  "range": "от 600cc",
+  "sign": "600+",
+  "arts": [
+   "sport",
+   "hyper"
+  ],
+  "cop": "sport",
+  "gears": 8,
+  "shift": 0.075,
+  "cyl": 4,
+  "idle": 2600,
+  "red": 15000,
+  "fLo": 900,
+  "fHi": 4200,
+  "vol": 0.19
+ }
+]
