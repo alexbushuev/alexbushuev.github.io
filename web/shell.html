@@ -67,7 +67,6 @@ window.gazLoops = (function () {
       voices[id] = { src, amp };
     },
     voice: put,
-    engine(pitch, a, b, c) { put('e0', pitch, a); put('e1', pitch, b); put('e2', pitch, c); },
     clear() { for (const id of Object.keys(voices)) { try { voices[id].src.stop(); voices[id].amp.disconnect(); } catch (e) {} delete voices[id]; } }
   };
 })();

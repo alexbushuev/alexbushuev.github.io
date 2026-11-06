@@ -2,7 +2,7 @@ extends Node
 # Screens: menu, garage, shop, bar, start screen, race, result.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 6
+const BUILD_NO := 7
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer

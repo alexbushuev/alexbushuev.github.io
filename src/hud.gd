@@ -163,13 +163,16 @@ func _draw() -> void:
 	_bar(Rect2(cx - 90.0, 50.0, 162.0, 7.0), me.rpm, C_RED if me.rpm > 0.93 else C_PAPER)
 	# place and progress, top left
 	var place := sim.live_place()
-	_text(font_big, "%d/%d" % [place, 8], Vector2(pad, 40.0), 34, C_YEL, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 6)
+	var place_txt := "%d/%d" % [place, sim.racers_left()]
+	_text(font_big, place_txt, Vector2(pad, 40.0), 34, C_YEL, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 6)
+	# how much of the track is behind you; ring tracks will show laps here
 	var prog: float = clamp((me.s - sim.road.start_s) / max(1.0, sim.road.finish_s - sim.road.start_s), 0.0, 1.0)
-	_bar(Rect2(pad, 48.0, 104.0, 5.0), prog, C_YEL)
-	_text(font_small, "ЗДОРОВЬЕ", Vector2(pad, 70.0), 12, C_PAPER, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 3)
-	_bar(Rect2(pad, 74.0, 104.0, 7.0), me.hp / 100.0, C_GRN if me.hp > 40.0 else C_RED)
-	_text(font_small, "БАЙК", Vector2(pad, 95.0), 12, C_PAPER, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 3)
-	_bar(Rect2(pad, 99.0, 104.0, 7.0), me.bike_hp / max(1.0, me.dur), C_PAPER)
+	var place_w: float = font_big.get_string_size(place_txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 34).x
+	_text(font_big, "%d%%" % int(floor(prog * 100.0)), Vector2(pad + place_w + 12.0, 40.0), 24, C_PAPER, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 5)
+	_text(font_small, "ЗДОРОВЬЕ", Vector2(pad, 62.0), 12, C_PAPER, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 3)
+	_bar(Rect2(pad, 66.0, 104.0, 7.0), me.hp / 100.0, C_GRN if me.hp > 40.0 else C_RED)
+	_text(font_small, "БАЙК", Vector2(pad, 87.0), 12, C_PAPER, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 3)
+	_bar(Rect2(pad, 91.0, 104.0, 7.0), me.bike_hp / max(1.0, me.dur), C_PAPER)
 	# nearest rival
 	var nf := sim.nearest_foe()
 	if nf != null:

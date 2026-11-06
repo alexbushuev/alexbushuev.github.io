@@ -16,37 +16,41 @@ func _ready() -> void:
 	_sound()
 	_keys()
 	await _deck()
+	_race_count()
 	print("FAILS: ", fails)
 	get_tree().quit()
 
 func _sound() -> void:
 	var tops: Array = []
-	for lg in D.leagues:
-		var st := {"cyl": int(lg.cyl), "idle": lg.idle, "red": lg.red, "f_lo": lg.fLo, "f_hi": lg.fHi}
-		for rr in [0.1, 0.3, 0.5, 0.7, 0.9, 1.0]:
+	for b in D.bikes:
+		var st := D.rider_stats(b, {}, 0, 0)
+		for rr in [0.2, 0.6, 1.0]:
+			var pitch := GameAudio.engine_pitch(rr, st)
 			var parts := GameAudio.engine_partials(rr, st)
-			var res := GameAudio.partials_level(parts, GameAudio.engine_pitch(rr, st))
+			var res := GameAudio.partials_level(parts, pitch)
+			var hz: float = pitch * GameAudio.BASE_HZ
 			if rr == 1.0:
-				tops.append(res[0])
-			print("%-18s rpm %3d%%  firing %3.0f Hz  >2 kHz %2d%%  partials %d" % [lg.full, int(rr * 100), GameAudio.engine_pitch(rr, st) * GameAudio.BASE_HZ, int(res[1] * 100), parts.size()])
-			check(res[1] < 0.25, "%s rpm %d: %d%% above 2 kHz" % [lg.full, int(rr * 100), int(res[1] * 100)])
+				print("%-10s %4dcc  note at redline %3.0f Hz, half note %3.0f Hz, above 1 kHz %2d%%" % [b.name, int(b.cc), hz, hz / 2.0, int(res[1] * 100)])
+				tops.append(hz)
+			check(res[1] < 0.35, "%s rpm %d: %d%% above 1 kHz" % [b.name, int(rr * 100), int(res[1] * 100)])
+			check(hz < 215.0, "%s rpm %d: the note is %d Hz, a whine" % [b.name, int(rr * 100), int(hz)])
 	S.data.volume = 1.0
 	check(abs(S.volume_db()) < 0.01, "100% is 0 dB")
 	S.data.volume = 0.5
 	check(abs(S.volume_db() + 12.04) < 0.1, "50% is -12 dB")
 	S.data.volume = 0.0
 	check(not S.sound_on(), "0% is off")
-	S.data.volume = 0.7
+	S.data.volume = 0.8
 	S.data.sound = false
 	check(not S.sound_on(), "switch off")
 	S.data.sound = true
 	var a := GameAudio.new()
 	add_child(a)
 	a.apply_settings()
-	a.setup({"cyl": 4, "idle": 2600, "red": 15000, "f_lo": 900, "f_hi": 4200})
+	a.setup(D.rider_stats(D.bike_by_id["tsunami"], {}, 0, 0))
 	a.update(0.016, 1.0, true, true, false, 1e9)
-	check(float(a.gains.e2) > 0.0, "engine plays")
-	check(float(a.gains.e0) == 0.0, "only the layers for these revs play")
+	check(float(a.gains.e1) > 0.0, "engine plays")
+	check(float(a.gains.e0) == 0.0, "only the layer for these revs plays")
 	S.data.sound = false
 	a.apply_settings()
 	a.update(0.016, 1.0, true, true, false, 1e9)
@@ -59,13 +63,38 @@ func _sound() -> void:
 	for id in a.gains:
 		check(float(a.gains[id]) == 0.0, "pause is silent")
 	a.update(0.016, 1.0, true, true, false, 1e9)
-	check(float(a.gains.e2) > 0.0, "back after pause")
-	var loud: float = float(a.gains.e2)
-	S.data.volume = 0.35
+	check(float(a.gains.e1) > 0.0, "back after pause")
+	for k in 40:
+		a.update(0.016, 1.0, true, true, false, 1e9)
+	var loud: float = float(a.gains.e1)
+	a.say("cop1", 0)
+	check(a.voice_player.playing or a.duck_voice_t > 0.0, "a line plays")
+	for k in 20:
+		a.update(0.016, 1.0, true, true, false, 1e9)
+	check(float(a.gains.e1) < loud * 0.6, "engine steps back for a voice")
+	a.voice_player.stop()
+	a.duck_voice_t = 0.0
+	for k in 60:
+		a.update(0.016, 1.0, true, true, false, 1e9)
+	S.data.vol_voice = 0.0
 	a.apply_settings()
-	a.update(0.016, 1.0, true, true, false, 1e9)
-	check(abs(linear_to_db(float(a.gains.e2) / loud) + 12.04) < 1.0, "half the slider, 12 dB down")
-	S.data.volume = 0.7
+	a.say("cop1", 0)
+	check(not a.voice_player.playing and a.duck_voice_t == 0.0, "voices off")
+	S.data.vol_voice = 1.0
+	S.data.vol_engine = 0.5
+	a.apply_settings()
+	for k in 60:
+		a.update(0.016, 1.0, true, true, false, 1e9)
+	check(abs(linear_to_db(float(a.gains.e1) / loud) + 12.04) < 1.0, "engine slider")
+	S.data.vol_engine = 1.0
+	a.apply_settings()
+	var was: float = float(S.data.volume)
+	S.data.volume = was * 0.5
+	a.apply_settings()
+	for k in 60:
+		a.update(0.016, 1.0, true, true, false, 1e9)
+	check(abs(linear_to_db(float(a.gains.e1) / loud) + 12.04) < 1.0, "half the slider, 12 dB down")
+	S.data.volume = was
 	a.apply_settings()
 	a.handle_event(["siren", true])
 	a.update(0.016, 1.0, true, true, false, 5.0)
@@ -110,9 +139,38 @@ func _keys() -> void:
 	f.store_string('{"v":1,"money":500,"sound":false}')
 	f.close()
 	S.load_save()
-	check(S.data.money == 500 and S.data.sound == false and float(S.data.volume) == 0.7 and S.data.keys.gas == ["Up", "W"], "old save loads")
+	check(S.data.money == 500 and S.data.sound == false and float(S.data.volume) == 0.8 and float(S.data.vol_engine) == 1.0 and S.data.keys.gas == ["Up", "W"], "old save loads")
 	S.reset_keys()
 	check(S.action_of_key(KEY_UP) == "gas", "reset")
+
+func _race_count() -> void:
+	var sim := Sim.new()
+	sim.setup(0, "strek", {}, 0, 0, 0, 0, 1)
+	check(sim.racers_left() == 8, "eight start: %d" % sim.racers_left())
+	var first: Sim.Rider = null
+	for f in sim.foes:
+		if not f.is_cop:
+			first = f
+			break
+	first.s = sim.me.s + 50.0
+	var before := sim.live_place()
+	first.out = true
+	check(sim.racers_left() == 7, "one out: %d" % sim.racers_left())
+	check(sim.live_place() == before - 1, "someone out ahead no longer counts for your place")
+	# a line says who is talking so the right voice plays
+	var cop: Sim.Rider = sim.cops[0]
+	sim.t = 100.0
+	sim.say_at = 0.0
+	sim.events.clear()
+	sim._say(cop, 1.0)
+	var e: Array = sim.events[0]
+	check(e[0] == "say" and e[2] == "cop1" and FileAccess.file_exists("res://audio/voices/%s_%d.wav" % [e[2], e[3]]), "cop line has a clip: " + str(e))
+	for id in D.rivals:
+		for i in D.rivals[id].say.size():
+			check(FileAccess.file_exists("res://audio/voices/%s_%d.wav" % [id, i]), "clip %s %d" % [id, i])
+	for c in D.sound.cops:
+		for i in c.say.size():
+			check(FileAccess.file_exists("res://audio/voices/%s_%d.wav" % [c.id, i]), "clip %s %d" % [c.id, i])
 
 func _deck() -> void:
 	S.reset_for_test()

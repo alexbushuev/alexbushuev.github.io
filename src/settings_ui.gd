@@ -6,17 +6,19 @@ signal close_requested
 class VolumeBar extends Control:
 	signal moved(v: float)
 	signal let_go
+	signal grabbed
 	var value := 0.7
 	var held := false
 
 	func _init() -> void:
-		custom_minimum_size = Vector2(0, 44)
+		custom_minimum_size = Vector2(0, 34)
 		mouse_filter = Control.MOUSE_FILTER_STOP
 
 	func _gui_input(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 			held = event.pressed
 			if held:
+				grabbed.emit()
 				_set_from(event.position.x)
 			else:
 				let_go.emit()
@@ -41,9 +43,10 @@ var audio: GameAudio
 var wait: Array = []     # [action, slot] while a key button waits for a press
 var msg := ""
 var sound_box: Control
-var vol_l: Label
-var bar: VolumeBar
+var sliders: Array = []    # [save key, name, label, bar]
 var list: ScrollList
+var preview_engine := false
+var made_engine := false
 
 func open(a: GameAudio) -> void:
 	audio = a
@@ -81,16 +84,17 @@ func open(a: GameAudio) -> void:
 	sound_box = HBoxContainer.new()
 	sound_box.add_theme_constant_override("separation", 8)
 	left.add_child(sound_box)
-	vol_l = UiKit.label("", UiKit.mid, 16, UiKit.PAPER)
-	left.add_child(vol_l)
-	bar = VolumeBar.new()
-	bar.value = float(S.data.volume)
-	bar.moved.connect(_volume_moved)
-	bar.let_go.connect(func() -> void:
-		S.persist()
-		audio.ui("ching"))
-	left.add_child(bar)
-	left.add_child(UiKit.label("Отпусти ползунок, и прозвучит пример громкости.", UiKit.small, 13, UiKit.MUTED, true))
+	for x in [["volume", "Громкость"], ["vol_engine", "Мотор"], ["vol_voice", "Голоса"]]:
+		var key: String = x[0]
+		var l := UiKit.label("", UiKit.mid, 15, UiKit.PAPER)
+		left.add_child(l)
+		var bar := VolumeBar.new()
+		bar.value = float(S.data[key])
+		bar.moved.connect(func(v: float) -> void: _volume_moved(key, v))
+		bar.grabbed.connect(func() -> void: _slider_grabbed(key))
+		bar.let_go.connect(func() -> void: _slider_released(key))
+		left.add_child(bar)
+		sliders.append([key, x[1], l, bar])
 	list = ScrollList.new()
 	list.size_flags_stretch_ratio = 1.2
 	cols.add_child(list)
@@ -106,8 +110,7 @@ func _render_sound() -> void:
 		b.custom_minimum_size = Vector2(0, 40)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		sound_box.add_child(b)
-	vol_l.text = "Громкость %d%%" % int(round(float(S.data.volume) * 100.0))
-	vol_l.modulate = Color.WHITE if on else Color(1, 1, 1, 0.5)
+	_label_sliders()
 
 func _set_sound(on: bool) -> void:
 	S.data.sound = on
@@ -117,10 +120,50 @@ func _set_sound(on: bool) -> void:
 	if on:
 		audio.ui("ching")
 
-func _volume_moved(v: float) -> void:
-	S.data.volume = v
+func _label_sliders() -> void:
+	var on: bool = bool(S.data.sound)
+	for x in sliders:
+		x[2].text = "%s %d%%" % [x[1], int(round(float(S.data[x[0]]) * 100.0))]
+		x[2].modulate = Color.WHITE if on else Color(1, 1, 1, 0.5)
+
+func _volume_moved(key: String, v: float) -> void:
+	S.data[key] = v
 	audio.apply_settings()
-	vol_l.text = "Громкость %d%%" % int(round(v * 100.0))
+	_label_sliders()
+
+# While the engine slider is held, the engine plays, so the level can be set by ear
+func _slider_grabbed(key: String) -> void:
+	if key != "vol_engine" or not S.sound_on():
+		return
+	preview_engine = true
+	if audio.gains.is_empty():
+		made_engine = true
+		var bike: Dictionary = D.bike_by_id["strek"]
+		for c in D.leagues.size():
+			var b: Variant = S.ride_of(c)
+			if b != null:
+				bike = b
+		audio.setup(D.rider_stats(bike, {}, 0, 0))
+
+func _slider_released(key: String) -> void:
+	S.persist()
+	if preview_engine:
+		preview_engine = false
+		audio.quiet()
+		return
+	if key == "vol_voice" and S.voices_on():
+		var cop: Dictionary = D.sound.cops[randi() % D.sound.cops.size()]
+		audio.say(cop.id, randi() % cop.say.size())
+	else:
+		audio.ui("ching")
+
+func _process(delta: float) -> void:
+	if preview_engine:
+		audio.update(delta, 0.9, true, true, false, 1e9)
+
+func _exit_tree() -> void:
+	if made_engine:
+		audio.stop_all()
 
 func _render_controls() -> void:
 	UiKit.clear(list.box)

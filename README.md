@@ -27,6 +27,10 @@
 
 Реальный звук: `AUDIO_MARKS=/tmp/m.txt xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 320x180 --write-movie /tmp/a.avi res://tests/audio_probe.tscn`, потом `python3 tools/audio_measure.py /tmp/a.avi /tmp/m.txt`.
 
+Рёв мотора и баланс звуков настраиваются в `data/sound.json`, без правки кода.
+
+Голоса заранее записаны в `audio/voices/` инструментом `tools/make_voices.py` (Piper, эффект рации на numpy/scipy). Новая реплика: добавить текст в `data/rivals.json` или `data/sound.json` и запустить инструмент. Голоса denis и dmitri под CC0; ruslan под CC BY-NC-SA, у irina лицензия не указана: перед продажей игры их надо заменить.
+
 В браузере зацикленные звуки (мотор, сирена, визг) играет страница, `gazLoops` в `web/shell.html`: у Godot в вебе цикл перезапускается вручную и щёлкает. Разовые звуки и сборка для ПК идут через Godot.
     # кадры без экрана
     xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 1280x590 -- shot 4 sapsan /tmp/a 10,20

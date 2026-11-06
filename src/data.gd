@@ -11,6 +11,7 @@ var themes: Array
 var rules: Dictionary
 var models: Dictionary
 var decor_solid: Dictionary
+var sound: Dictionary
 
 func _load(n: String) -> Variant:
 	var f := FileAccess.open(n, FileAccess.READ)
@@ -32,6 +33,7 @@ func load_all() -> void:
 	rivals = _load("res://data/rivals.json")
 	themes = _load("res://data/themes.json")
 	rules = _load("res://data/rules.json")
+	sound = _load("res://data/sound.json")
 	decor_solid = _load("res://data/decor_solid.json")
 	models = _load("res://models/models.json")
 	for b in bikes:
@@ -89,7 +91,7 @@ func rider_stats(b: Dictionary, u: Dictionary, ts: int, th: int, glove := 0, boo
 	var c: Dictionary = leagues[int(b.cat)]
 	var kmh: float = s.kmh * (1.0 - aero_loss(fx.aero, s.kmh))
 	return {
-		"gears": int(c.gears), "shift": c.shift, "cyl": int(c.cyl), "idle": c.idle, "red": c.red, "f_lo": c.fLo, "f_hi": c.fHi,
+		"gears": int(c.gears), "shift": c.shift, "cyl": int(c.cyl), "idle": c.idle, "red": c.red, "voice": sound_voice(b),
 		"kmh": kmh, "top": world_speed(kmh), "accel": s.acc * (1.0 - weight_loss(fx.kg, s.hp)),
 		"a_grip": a_grip(s.grip, s.hand), "a_brake": a_brake(s.grip, world_speed(kmh)), "off": 1.2 - 0.006 * s.grip,
 		"grip_f": grip_f(s.grip), "steer": steer_k(s.hand), "dur": s.dur, "prot": fx.prot, "no_hand": fx.no_hand, "hit_k": fx.hit,
@@ -97,6 +99,12 @@ func rider_stats(b: Dictionary, u: Dictionary, ts: int, th: int, glove := 0, boo
 		"kick": max(1, round((9 + 3 * boot) * fx.kick)), "push": 1.0 + 0.15 * boot,
 		"weapon": "none" if fx.no_hand else weapon,
 	}
+
+# Each league's engine note; a bigger engine sits a little lower than a smaller one in its league
+func sound_voice(b: Dictionary) -> Dictionary:
+	var v: Dictionary = sound.leagues[int(b.cat)].duplicate()
+	v["k"] = clamp(pow(float(v.cc) / max(1.0, float(b.cc)), 0.2), 0.8, 1.25)
+	return v
 
 func outfit(ts: int, cs: int, ch: int, glove := 0, boot := 0) -> Dictionary:
 	var col: Dictionary = gear.colors[cs]

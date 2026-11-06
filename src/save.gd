@@ -15,7 +15,7 @@ func _ready() -> void:
 func fresh() -> Dictionary:
 	var strek: Dictionary = D.bike_by_id["strek"]
 	return {
-		"v": 1, "money": 0, "open": 1, "best": {}, "sound": true, "volume": 0.7, "keys": default_keys(),
+		"v": 1, "money": 0, "open": 1, "best": {}, "sound": true, "volume": 0.8, "vol_engine": 1.0, "vol_voice": 1.0, "keys": default_keys(),
 		"bikes": {"strek": new_bike(strek)}, "ride": {"0": "strek"},
 		"gear": {"glove": 0, "boot": 0, "baton": 0, "chain": 0, "suit": 0, "suits": [0], "helmet": 0, "helmets": [0], "suitColor": 0, "helmColor": 5, "weaponPick": "best"},
 	}
@@ -82,9 +82,12 @@ func sound_on() -> bool:
 	return bool(data.sound) and float(data.volume) > 0.001
 
 # the slider follows the ear, not the amplitude: half way is about a quarter of the signal
-func volume_db() -> float:
-	var v: float = clamp(float(data.volume), 0.0, 1.0)
+func volume_db(key := "volume") -> float:
+	var v: float = clamp(float(data[key]), 0.0, 1.0)
 	return linear_to_db(max(v * v, 0.00001))
+
+func voices_on() -> bool:
+	return float(data.vol_voice) > 0.001
 
 # ---------- keys ----------
 func default_keys() -> Dictionary:

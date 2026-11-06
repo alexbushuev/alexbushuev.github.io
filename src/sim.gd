@@ -51,6 +51,9 @@ class Rider:
 	var skill := 1.0
 	var aggr := 0.5
 	var ch: Variant = null      # rival character
+	var lines: Array = []       # what he shouts over the radio
+	var voice_id := ""
+	var talk_t := 0.0           # a cop on your tail keeps talking
 	var style := ""
 	var bike: Dictionary = {}
 	var look: Dictionary = {}
@@ -157,8 +160,8 @@ var banner_bad := false
 var say_txt := ""
 var rng := RandomNumberGenerator.new()
 
-func ev(kind: String, a: Variant = null, b: Variant = null) -> void:
-	events.append([kind, a, b])
+func ev(kind: String, a: Variant = null, b: Variant = null, c: Variant = null) -> void:
+	events.append([kind, a, b, c])
 
 # what the speedometer shows for a rider going at world speed v
 func dial(r: Rider, v: float) -> float:
@@ -212,6 +215,8 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 		var f := Rider.new()
 		f.name = c.name
 		f.ch = c
+		f.lines = c.say
+		f.voice_id = e[0]
 		f.style = c.style
 		f.skill = c.skill
 		f.aggr = c.aggr
@@ -244,6 +249,10 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 	for fr in tr.cops:
 		var c2 := Rider.new()
 		c2.name = "Инспектор" + ("" if cop_i == 0 else " %d" % (cop_i + 1))
+		var cop_voice: Dictionary = D.sound.cops[cop_i % D.sound.cops.size()]
+		c2.lines = cop_voice.say
+		c2.voice_id = cop_voice.id
+		c2.talk_t = 4.0
 		c2.is_cop = true
 		c2.state = WAIT
 		c2.s = road.finish_s * fr
@@ -691,6 +700,7 @@ func _start_chase(c: Rider, who: Rider = null) -> void:
 	c.lane = 5.4
 	if abs(c.s - me.s) < 150.0:
 		show_banner("Сирена!", true)
+		_say(c, 1.0)
 	ev("siren", true)
 
 # Cops go for whichever racer is closest. Whoever just hit one gets his full attention.
@@ -744,19 +754,27 @@ func _cop_hit(f: Rider, tg: Rider, w: Dictionary, side: int) -> void:
 			show_banner("Коп взял: " + tg.name)
 
 func _say(f: Rider, chance: float) -> void:
-	if f.ch == null or rng.randf() > chance or t < say_at:
+	if f.lines.is_empty() or rng.randf() > chance or t < say_at:
 		return
 	say_at = t + 3.5
-	var l: Array = f.ch.say
-	say_txt = f.name + ": " + str(l[rng.randi() % l.size()])
-	ev("say", say_txt)
+	var i: int = rng.randi() % f.lines.size()
+	say_txt = f.name + ": " + str(f.lines[i])
+	ev("say", say_txt, f.voice_id, i)
 
 func live_place() -> int:
 	var p := 1
 	for f in foes:
-		if not f.is_cop and f.s > me.s:
+		if not f.is_cop and not f.out and f.s > me.s:
 			p += 1
 	return p
+
+# how many are still in the race, you included: the dead and the arrested drop off the count
+func racers_left() -> int:
+	var n := 1
+	for f in foes:
+		if not f.is_cop and not f.out:
+			n += 1
+	return n
 
 # ---------- bends: how fast a rider can be here and still make everything he can see ----------
 func corner_limit(s: float, v: float, a_grip: float, a_brake: float, margin := 0.92) -> float:
@@ -1110,9 +1128,14 @@ func _update_foe(f: Rider, dt: float) -> void:
 		tx = clamp(m.d, -6.6, 6.6)
 	if live and sty == "coward" and f.angry > 0.0 and adz < 30.0:
 		tx = 6.6 if f.d >= m.d else -6.6
-	if live and not f.said and adz < 13.0 and not f.is_cop:
+	if live and not f.said and adz < 13.0:
 		f.said = true
-		_say(f, 0.5)
+		_say(f, 1.0 if f.is_cop else 0.5)
+	if live and f.is_cop and adz < 30.0:
+		f.talk_t -= dt
+		if f.talk_t <= 0.0:
+			f.talk_t = rng.randf_range(7.0, 13.0)
+			_say(f, 1.0)
 	for c in cars:
 		var dd: float = c.s - f.s
 		if dd > 0.0 and dd < (16.0 + (f.v - c.v) * 0.9) * (0.5 if sty == "maniac" else 1.0) and abs(c.d - f.d) < 2.3:
