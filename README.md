@@ -20,8 +20,12 @@
     # импорт и бот
     godot --headless --path . --import
     godot --headless --path . res://tests/bot_test.tscn -- all x human
+    godot --headless --path . res://tests/rules_test.tscn     # копы, деньги, сохранение
+    godot --headless --path . res://tests/traffic_test.tscn   # трафик против байка
+    godot --headless --path . res://tests/steer_test.tscn     # замеры руля
     # кадры без экрана
     xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 1280x590 -- shot 4 sapsan /tmp/a 10,20
+    xvfb-run -a godot --path . --rendering-driver opengl3 --resolution 1280x590 -- ui /tmp/u   # все экраны
     # браузерная сборка в dist/
     tools/build_web.sh godot
     # выкладка: dist/ в ветку gaz3d, сервер забирает её сам
@@ -34,8 +38,8 @@
 
 ## План
 
-1. Ранняя сборка: езда, соперники, удары, падения, полиция, трафик, звук. Готово.
-2. Гараж, магазин, деньги, экипировка, сохранение, настройка кнопок (всё это есть в 2D-версии и в `data/`).
-3. Шлифовка: управление, физика, ощущение скорости, звук, эффекты.
+1. Езда, соперники, удары, падения, полиция, трафик, звук. Готово.
+2. Гараж, магазин, деньги, экипировка, сохранение, бар с досье, экран перед стартом. Готово.
+3. Настройка кнопок (есть в 2D). Шлифовка: управление, физика, ощущение скорости, звук, эффекты.
 4. Больше деталей на трассах, анимации, лучшие модели.
 5. Сборка для ПК (.exe), потом Android и iPhone.

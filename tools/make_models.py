@@ -402,8 +402,11 @@ def make_weapons():
     mat = reset()
     k = Kit()
     # both held at the origin, pointing along +Y in Blender (forward)
-    k.tube((0, -.06, 0), (0, .60, 0), .018, hexc('#1b1b20'), 'baton', verts=8, r2=.026)
-    k.tube((.0, -.08, 0), (0, .06, 0), .024, hexc('#5a4632'), 'baton', verts=6)
+    # police tonfa-style baton: black rubber, white band, visible at a distance
+    k.tube((0, -.06, 0), (0, .62, 0), .024, hexc('#14141a'), 'baton', verts=8, r2=.034)
+    k.tube((.0, -.08, 0), (0, .06, 0), .03, hexc('#3a3a42'), 'baton', verts=6)
+    k.tube((0, .42, 0), (0, .50, 0), .034, hexc('#f3eedf'), 'baton', verts=8)
+    k.blob((0, .62, 0), (.034, .034, .034), hexc('#14141a'), 'baton', seg=8, rings=5, smooth=True)
     b = k.join('baton', 'baton')
     n = 11
     for i in range(n):

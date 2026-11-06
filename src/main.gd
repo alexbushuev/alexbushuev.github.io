@@ -1,8 +1,8 @@
 extends Node
-# Screens: menu -> choose bike -> race -> result. Test build: no money or garage yet, those move over next.
+# Screens: menu, garage, shop, bar, start screen, race, result.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 4
+const BUILD_NO := 5
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -13,6 +13,7 @@ var overlay: Control
 var view_rect: TextureRect
 var view_port: SubViewport
 var race_view: RaceView
+var room: Showroom
 var audio: GameAudio
 var sim: Sim
 var running := false
@@ -39,6 +40,9 @@ func _ready() -> void:
 	font_big = _font("fira-sans-extra-condensed-latin-900-italic.woff2", "fira-sans-extra-condensed-cyrillic-900-italic.woff2")
 	font_mid = _font("fira-sans-condensed-latin-700-normal.woff2", "fira-sans-condensed-cyrillic-700-normal.woff2")
 	font_small = _font("fira-sans-condensed-latin-500-normal.woff2", "fira-sans-condensed-cyrillic-500-normal.woff2")
+	UiKit.big = font_big
+	UiKit.mid = font_mid
+	UiKit.small = font_small
 	var th := Theme.new()
 	th.default_font = font_mid
 	th.default_font_size = 18
@@ -74,9 +78,12 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_fit_resolution)
 	_fit_resolution()
 	var args := OS.get_cmdline_user_args()
-	if args.size() >= 3 and args[0] == "shot":
+	if args.size() >= 2 and args[0] == "ui":
+		auto_mode = "ui"
+		_ui_shots(args[1])
+	elif args.size() >= 3 and args[0] == "shot":
 		auto_mode = "shot"
-		_start_race(int(args[1]), args[2])
+		_start_race_test(int(args[1]), args[2])
 	else:
 		_show_menu()
 
@@ -89,124 +96,207 @@ func _fit_resolution() -> void:
 		quality = quality_max
 		view_port.msaa_3d = Viewport.MSAA_2X if phone else Viewport.MSAA_4X
 	view_port.size = Vector2i(max(16, int(win.x * quality)), max(16, int(win.y * quality)))
+	if room != null:
+		room.layout()
 
 # ---------- menu ----------
 func _clear_ui() -> void:
 	for c in menu.get_children():
+		menu.remove_child(c)
 		c.queue_free()
 
 func _bg(col: Color) -> ColorRect:
 	var r := ColorRect.new()
 	r.color = col
-	r.set_anchors_preset(Control.PRESET_FULL_RECT)
+	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	menu.add_child(r)
 	return r
 
-func _style(col: Color) -> StyleBoxFlat:
-	var s := StyleBoxFlat.new()
-	s.bg_color = col
-	s.content_margin_left = 12
-	s.content_margin_right = 12
-	s.content_margin_top = 6
-	s.content_margin_bottom = 6
-	return s
-
-func _button(txt: String, cb: Callable, col := Color("#2a2a32"), fg := Color("#f3eedf"), sz := 18) -> Button:
-	var b := Button.new()
-	b.text = txt
-	b.add_theme_stylebox_override("normal", _style(col))
-	b.add_theme_stylebox_override("hover", _style(col.lightened(0.08)))
-	b.add_theme_stylebox_override("pressed", _style(col.lightened(0.18)))
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	b.add_theme_color_override("font_color", fg)
-	b.add_theme_color_override("font_hover_color", fg)
-	b.add_theme_color_override("font_pressed_color", fg)
-	b.add_theme_font_size_override("font_size", sz)
-	b.pressed.connect(cb)
-	return b
+func _button(txt: String, cb: Callable, col := UiKit.INK3, fg := UiKit.PAPER, sz := 16) -> Button:
+	return UiKit.button(txt, cb, col, fg, sz)
 
 func _label(txt: String, f: Font, sz: int, col: Color) -> Label:
-	var l := Label.new()
-	l.text = txt
-	l.add_theme_font_override("font", f)
-	l.add_theme_font_size_override("font_size", sz)
-	l.add_theme_color_override("font_color", col)
-	return l
+	return UiKit.label(txt, f, sz, col)
 
-func _page() -> VBoxContainer:
-	var m := MarginContainer.new()
-	m.set_anchors_preset(Control.PRESET_FULL_RECT)
-	for k in ["left", "right", "top", "bottom"]:
-		m.add_theme_constant_override("margin_" + k, 18)
-	menu.add_child(m)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	m.add_child(scroll)
-	var v := VBoxContainer.new()
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_theme_constant_override("separation", 8)
-	scroll.add_child(v)
-	return v
+func _drop_room() -> void:
+	if room != null:
+		view_port.remove_child(room)
+		room.queue_free()
+		room = null
+
+func _make_room(kind: String) -> Showroom:
+	_end_race_nodes()
+	_drop_room()
+	room = Showroom.new()
+	view_port.add_child(room)
+	room.build(kind)
+	return room
 
 func _show_menu() -> void:
+	_end_race_nodes()
+	_drop_room()
+	sim = null
 	_clear_ui()
-	_bg(Color("#17161c"))
-	var v := _page()
+	_bg(UiKit.INK)
+	var m := MarginContainer.new()
+	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for key in ["left", "right"]:
+		m.add_theme_constant_override("margin_" + key, 14)
+	m.add_theme_constant_override("margin_top", 8)
+	m.add_theme_constant_override("margin_bottom", 8)
+	menu.add_child(m)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	m.add_child(v)
 	var head := HBoxContainer.new()
-	head.add_child(_label("ГАЗ И ЦЕПЬ", font_big, 46, Color("#ffc81f")))
-	var tag := _label("  3D · сборка %d" % BUILD_NO, font_small, 18, Color("#a9a7b4"))
-	head.add_child(tag)
+	head.add_theme_constant_override("separation", 8)
+	head.add_child(_label("ГАЗ И ЦЕПЬ", font_big, 34, UiKit.YEL))
+	head.add_child(_label("3D · сборка %d" % BUILD_NO, font_small, 14, UiKit.MUTED))
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(sp)
+	head.add_child(_label(S.fmt(S.data.money), font_big, 24, UiKit.PAPER))
+	head.add_child(_button("Гараж", _open_garage.bind(""), UiKit.YEL, UiKit.INK))
+	head.add_child(_button("Магазин", _open_shop.bind(-1, ""), UiKit.PAPER, UiKit.INK))
+	head.add_child(_button("Бар", _open_bar.bind(-1), Color("#7a1f3d"), UiKit.PAPER))
 	v.add_child(head)
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_child(grid)
-	for i in D.tracks.size():
-		var t: Dictionary = D.tracks[i]
-		var lg: Dictionary = D.leagues[int(t.cat)]
-		var b := _button("%s\n%s" % [t.name, lg.full], _show_bikes.bind(i), ["#3a3524", "#24344a", "#4a2424"][int(t.cat)])
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size = Vector2(0, 64)
-		grid.add_child(b)
+	var list := ScrollList.new()
+	v.add_child(list)
+	for c in D.leagues.size():
+		var lg: Dictionary = D.leagues[c]
+		var open_c: bool = S.cat_open(c)
+		var bike: Variant = S.ride_of(c)
+		var p := UiKit.panel(UiKit.INK2, 8, 6)
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 8)
+		p.add_child(h)
+		var ring: Color = UiKit.RED if open_c else Color("#77757f")
+		var sign_w := UiKit.sign_label(str(lg.sign), ring, 46)
+		sign_w.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(sign_w)
+		var tv := VBoxContainer.new()
+		tv.custom_minimum_size = Vector2(190, 0)
+		tv.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		tv.add_theme_constant_override("separation", 0)
+		tv.add_child(_label(lg.full, font_mid, 18, UiKit.PAPER if open_c else UiKit.MUTED))
+		var sub: String = str(lg.range)
+		if open_c:
+			if bike != null:
+				sub = "%s %dcc, %d км/ч" % [bike.name, int(bike.cc), int(D.stats_of(bike, S.upgrades(bike.id)).kmh)]
+			else:
+				sub = "Нужен байк из магазина"
+		tv.add_child(_label(sub, font_small, 13, UiKit.MUTED))
+		h.add_child(tv)
+		for i in D.tracks.size():
+			var t: Dictionary = D.tracks[i]
+			if int(t.cat) != c:
+				continue
+			var op: bool = S.track_open(i)
+			var best: Variant = S.data.best.get(t.id)
+			var st: String
+			if not op:
+				st = "Нужен топ-3: " + str(D.tracks[i - 1].name)
+			elif bike == null:
+				st = "Сначала байк"
+			elif best != null:
+				st = "%d место" % int(best)
+			else:
+				st = "Едем"
+			var b := _button("%s\n%s" % [t.name, st], _begin.bind(i), Color("#3f3d4a") if op else Color(0.12, 0.12, 0.14), UiKit.PAPER if op else UiKit.MUTED, 14)
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.custom_minimum_size = Vector2(0, 58)
+			h.add_child(b)
+		list.box.add_child(p)
+	var tests := HBoxContainer.new()
+	tests.add_theme_constant_override("separation", 6)
+	if int(S.data.open) < D.tracks.size():
+		tests.add_child(_button("Для теста: открыть все трассы", func() -> void:
+			S.open_everything()
+			_show_menu(), UiKit.INK2, UiKit.MUTED, 13))
+	tests.add_child(_button("Для теста: +$25 000", func() -> void:
+		S.add_test_money()
+		_show_menu(), UiKit.INK2, UiKit.MUTED, 13))
+	list.box.add_child(tests)
 
-func _show_bikes(track_i: int) -> void:
+func _begin(i: int) -> void:
+	if not S.track_open(i):
+		audio.ui("deny")
+		return
+	var cat: int = D.tracks[i].cat
+	if S.ride_of(cat) == null:
+		var owned := S.owned_in(cat)
+		if owned.size() > 0:
+			S.data.ride[str(cat)] = owned[0].id
+			S.persist()
+		else:
+			_open_shop(cat, "")
+			return
+	_open_prerace(i)
+
+func _open_prerace(i: int) -> void:
 	_clear_ui()
-	_bg(Color("#17161c"))
-	var v := _page()
-	var t: Dictionary = D.tracks[track_i]
-	var head := HBoxContainer.new()
-	head.add_child(_button("Назад", _show_menu))
-	var l := _label("  " + str(t.name) + ": на чём едем", font_mid, 22, Color("#f3eedf"))
-	head.add_child(l)
-	v.add_child(head)
-	for b in D.bikes:
-		if int(b.cat) != int(t.cat):
-			continue
-		var txt := "%s %dcc   %d км/ч · %s" % [b.name, int(b.cc), int(b.kmh), b.type]
-		var btn := _button(txt, _start_race.bind(track_i, b.id))
-		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		btn.custom_minimum_size = Vector2(0, 50)
-		v.add_child(btn)
+	pending_track = i
+	var r := _make_room("garage")
+	var ui := PreRaceUi.new()
+	menu.add_child(ui)
+	ui.open(r, i)
+	ui.back_requested.connect(_show_menu)
+	ui.start_requested.connect(_start_race)
+	ui.bar_requested.connect(_open_bar_from_start)
+	ui.garage_requested.connect(_open_garage.bind(""))
+
+func _open_bar_from_start(league: int) -> void:
+	_open_bar(league)
+
+func _open_garage(id: String) -> void:
+	_open_stock(false, id, -1)
+
+func _open_shop(cat: int, id: String) -> void:
+	_open_stock(true, id, cat)
+
+func _open_stock(shop: bool, id: String, cat: int) -> void:
+	_clear_ui()
+	var r := _make_room("shop" if shop else "garage")
+	var ui := GarageUi.new()
+	menu.add_child(ui)
+	ui.open(r, shop, audio, id, cat)
+	ui.close_requested.connect(_show_menu)
+	ui.race_requested.connect(_begin)
+
+func _open_bar(league: int) -> void:
+	_clear_ui()
+	var r := _make_room("bar")
+	var ui := BarUi.new()
+	menu.add_child(ui)
+	ui.open(r, league)
+	ui.close_requested.connect(_show_menu)
 
 # ---------- race ----------
-func _start_race(track_i: int, bike_id: String) -> void:
+func _start_race(track_i: int) -> void:
+	var bike: Dictionary = S.ride_of(int(D.tracks[track_i].cat))
+	var lo := S.loadout(bike.id)
+	await _launch_race(track_i, bike.id, lo.u, lo.suit, lo.helmet, lo.cs, lo.ch, lo.extra)
+
+func _start_race_test(track_i: int, bike_id: String) -> void:
+	var g: Array = TEST_GEAR[int(D.tracks[track_i].cat)]
+	await _launch_race(track_i, bike_id, {}, g[0], g[1], 0, 5, {"weapon": "chain"})
+
+func _launch_race(track_i: int, bike_id: String, u: Dictionary, ts: int, th: int, cs: int, ch: int, extra: Dictionary) -> void:
 	_clear_ui()
 	pending_track = track_i
 	pending_bike = bike_id
-	_bg(Color("#17161c"))
+	_bg(UiKit.INK)
 	var c := CenterContainer.new()
-	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	menu.add_child(c)
-	c.add_child(_label("Строим трассу…", font_big, 36, Color("#ffc81f")))
+	c.add_child(_label("Строим трассу…", font_big, 36, UiKit.YEL))
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_end_race_nodes()
+	_drop_room()
 	sim = Sim.new()
-	var g: Array = TEST_GEAR[int(D.tracks[track_i].cat)]
-	sim.setup(track_i, bike_id, {}, g[0], g[1], 0, 5, randi())
+	sim.setup(track_i, bike_id, u, ts, th, cs, ch, randi(), extra)
 	race_view = RaceView.new()
 	view_port.add_child(race_view)
 	await race_view.build(sim)
@@ -253,43 +343,82 @@ func _show_pause() -> void:
 	c.add_child(v)
 	v.add_child(_label("Пауза", font_big, 44, Color("#ffc81f")))
 	v.add_child(_button("Дальше", _toggle_pause, Color("#ffc81f"), Color("#16151b"), 22))
-	v.add_child(_button("Заново", _start_race.bind(pending_track, pending_bike)))
+	v.add_child(_button("Заново", _start_race.bind(pending_track)))
 	v.add_child(_button("В меню", _quit_to_menu))
 
 func _quit_to_menu() -> void:
-	_end_race_nodes()
-	sim = null
 	_show_menu()
 
 func _show_result(kind: String) -> void:
 	audio.stop_all()
+	var res := S.finish_race(sim, kind)
+	_result_screen(res)
+
+func _result_screen(res: Dictionary) -> void:
 	_clear_ui()
-	_bg(Color(0, 0, 0, 0.62))
-	var c := CenterContainer.new()
-	c.set_anchors_preset(Control.PRESET_FULL_RECT)
-	menu.add_child(c)
+	_bg(Color(0.04, 0.04, 0.06, 0.8))
+	var m := MarginContainer.new()
+	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for key in ["left", "right"]:
+		m.add_theme_constant_override("margin_" + key, 24)
+	m.add_theme_constant_override("margin_top", 10)
+	m.add_theme_constant_override("margin_bottom", 10)
+	menu.add_child(m)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 8)
-	c.add_child(v)
-	var title := "Финиш"
-	var sub := ""
-	match kind:
-		"finish":
-			title = "Место %d из 8" % sim.final_place
-			sub = "Время %d:%02d · нокаутов %d · падений %d" % [int(sim.stats.t_finish) / 60, int(sim.stats.t_finish) % 60, sim.stats.ko, sim.me.falls]
-		"dead":
-			title = "Скорая уже едет"
-			sub = "Падение на %d км/ч. Защита решает." % int(sim.me.fall_kmh)
-		"busted":
-			title = "Арест"
-			sub = "Упал рядом с копом"
-		"wrecked":
-			title = "Байк разбит"
-			sub = "Дальше пешком"
-	v.add_child(_label(title, font_big, 48, Color("#ffc81f")))
-	v.add_child(_label(sub, font_mid, 20, Color("#f3eedf")))
-	v.add_child(_button("Ещё раз", _start_race.bind(pending_track, pending_bike), Color("#ffc81f"), Color("#16151b"), 22))
-	v.add_child(_button("В меню", _quit_to_menu))
+	v.add_theme_constant_override("separation", 6)
+	m.add_child(v)
+	v.add_child(_label(res.title, font_big, 40, UiKit.RED if res.bad else UiKit.YEL))
+	v.add_child(UiKit.label(res.text, font_mid, 16, UiKit.PAPER, true))
+	if res.note != "":
+		v.add_child(UiKit.label(res.note, font_mid, 15, UiKit.YEL, true))
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 20)
+	cols.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(cols)
+	if res.finished:
+		var table := VBoxContainer.new()
+		table.add_theme_constant_override("separation", 0)
+		table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var rows: Array = res.rows
+		for k in min(8, rows.size()):
+			var me_row: bool = rows[k] == "Ты"
+			table.add_child(UiKit.label("%d. %s" % [k + 1, rows[k]], font_mid if me_row else font_small, 14, UiKit.YEL if me_row else UiKit.PAPER))
+		cols.add_child(table)
+	var led := VBoxContainer.new()
+	led.add_theme_constant_override("separation", 2)
+	led.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var ledger: Array = res.ledger
+	if ledger.is_empty():
+		led.add_child(_ledger_line("За гонку", "$0", UiKit.PAPER))
+	for r in ledger:
+		var n: int = r[1]
+		led.add_child(_ledger_line(r[0], ("+" if n >= 0 else "−") + S.fmt(n), UiKit.GRN if n >= 0 else UiKit.RED))
+	led.add_child(_ledger_line("На счету", S.fmt(res.money), UiKit.PAPER, true))
+	cols.add_child(led)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var nxt: int = res.next
+	if nxt >= 0:
+		var has_bike: bool = S.ride_of(int(D.tracks[nxt].cat)) != null or S.owned_in(int(D.tracks[nxt].cat)).size() > 0
+		var b := _button(str(D.tracks[nxt].name) if has_bike else "В магазин", _begin.bind(nxt), UiKit.YEL, UiKit.INK, 18)
+		b.custom_minimum_size = Vector2(0, 44)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(b)
+	for x in [["Ещё раз", _begin.bind(pending_track)], ["Гараж", _open_garage.bind("")], ["В меню", _show_menu]]:
+		var b2 := _button(x[0], x[1], UiKit.INK3, UiKit.PAPER, 18)
+		b2.custom_minimum_size = Vector2(0, 44)
+		b2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(b2)
+	v.add_child(row)
+
+func _ledger_line(a: String, b: String, col: Color, bold := false) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_child(_label(a, font_mid if bold else font_small, 15, UiKit.PAPER))
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(sp)
+	h.add_child(_label(b, font_mid, 15, col))
+	return h
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and running:
@@ -307,14 +436,20 @@ func _process(delta: float) -> void:
 	while acc >= STEP:
 		acc -= STEP
 		sim.step(STEP)
+	var over_kind := ""
 	for e in sim.events:
 		race_view.handle_event(e)
 		audio.handle_event(e)
 		hud.handle_event(e)
-		if e[0] == "over":
-			running = false
-			_show_result(e[1])
+		if e[0] == "stock":
+			S.use_weapon(e[1])
+		elif e[0] == "over":
+			over_kind = e[1]
 	sim.events.clear()
+	if over_kind != "":
+		running = false
+		_show_result(over_kind)
+		return
 	var near := 1e9
 	for c in sim.cops:
 		if c.state == Sim.RIDE:
@@ -347,6 +482,9 @@ func _run_shots() -> void:
 		return
 	if mode == "brake":
 		await _brake_shots(out)
+		return
+	if mode == "cop":
+		await _cop_shots(out)
 		return
 	var times: Array = str(args[4]).split(",")
 	var i := 0
@@ -447,4 +585,78 @@ func _brake_shots(out: String) -> void:
 	for k in 5:
 		await get_tree().process_frame
 	get_viewport().get_texture().get_image().save_png("%s_queue.png" % out)
+	get_tree().quit()
+
+# Walks through every new screen, saves pictures, and checks purchases survive a reload. Writes a test save, not yours.
+func _ui_shots(out: String) -> void:
+	S.path = "user://ui_test_save.json"
+	S.reset_for_test()
+	S.data.money = 30000
+	var snap := func(n: String) -> void:
+		for k in 8:
+			await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png("%s_%s.png" % [out, n])
+	_show_menu()
+	await snap.call("menu")
+	_open_garage("")
+	await snap.call("garage")
+	var g: GarageUi = menu.get_child(0)
+	g.tab = "gear"
+	g.render()
+	await snap.call("gear")
+	S.buy_wear("suit", 2)
+	S.buy_wear("helmet", 2)
+	S.buy_weapon("chain")
+	g.render()
+	await snap.call("gear2")
+	_open_shop(0, "buivol")
+	await snap.call("shop")
+	S.buy_bike("buivol")
+	S.buy_up("buivol", "eng")
+	_open_garage("buivol")
+	await snap.call("garage2")
+	_open_prerace(0)
+	await snap.call("start")
+	S.open_everything()
+	_show_menu()
+	await snap.call("menu2")
+	_open_bar(0)
+	await snap.call("bar")
+	var b: BarUi = menu.get_child(0)
+	b.who = "zina"
+	b.render()
+	await snap.call("bar2")
+	b.tab = 2
+	b.who = "gvozd"
+	b.render()
+	await snap.call("bar3")
+	b.tab = 3
+	b.render()
+	await snap.call("bar4")
+	_result_screen({"title": "2 место", "text": "Призовое место на трассе Дачи.", "note": "Открыта трасса Рисовые поля.", "bad": false, "finished": true, "rows": ["Гвоздь", "Ты", "Хром", "Мазут", "Рыжий", "Валера", "Сиплый, сход", "Карбюратор"], "ledger": [["Приз за 2 место", 240], ["Нокауты × 2", 48], ["Коп вырублен", 100], ["Ремонт", -30]], "money": 1358, "next": 1})
+	await snap.call("result")
+	get_tree().quit()
+
+func _cop_shots(out: String) -> void:
+	sim.bot_peace = true
+	for k in 300:
+		sim.step(STEP)
+	sim.events.clear()
+	var me := sim.me
+	var cop: Sim.Rider = sim.cops[0]
+	cop.state = Sim.RIDE
+	cop.target = me
+	cop.s = me.s + 0.4
+	cop.d = me.d + 1.5
+	cop.v = me.v
+	var frames := [["ride", 0.0], ["back", 0.14], ["swing", 0.27]]
+	for fr in frames:
+		cop.attack = null if fr[1] == 0.0 else {"t": fr[1], "side": -1, "done": true, "weapon": "baton", "type": "hand"}
+		for n in ["", "c"]:
+			race_view.debug_close = n == "c"
+			for k in 5:
+				cop.s = me.s + 0.4
+				cop.d = me.d + 1.5
+				await get_tree().process_frame
+			get_viewport().get_texture().get_image().save_png("%s_%s%s.png" % [out, fr[0], n])
 	get_tree().quit()

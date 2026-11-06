@@ -13,6 +13,8 @@ var cache := {}
 var st: Dictionary = {}
 var dip := 0.0
 var enabled := true
+var ui_player: AudioStreamPlayer
+var ui_sounds := {}
 
 func _wav(samples: PackedFloat32Array, loop := false) -> AudioStreamWAV:
 	var w := AudioStreamWAV.new()
@@ -109,11 +111,33 @@ func _player(stream: AudioStream, vol := 0.0) -> AudioStreamPlayer:
 	add_child(p)
 	return p
 
+func _ready() -> void:
+	ui_player = _player(null)
+	ui_sounds["ching"] = _coin()
+	ui_sounds["deny"] = _beep(170.0, 0.14)
+
+func _coin() -> AudioStreamWAV:
+	var n := int(RATE * 0.22)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for i in n:
+		var t := float(i) / RATE
+		var hz: float = 1320.0 if t < 0.07 else 1760.0
+		out[i] = sin(TAU * hz * t) * 0.45 * exp(-t * 11.0)
+	return _wav(out)
+
+func ui(name_s: String) -> void:
+	if ui_player != null and ui_sounds.has(name_s):
+		ui_player.stream = ui_sounds[name_s]
+		ui_player.volume_db = -7.0
+		ui_player.play()
+
 func setup(stats: Dictionary) -> void:
 	st = stats
 	cache.clear()
 	for c in get_children():
-		c.queue_free()
+		if c != ui_player:
+			c.queue_free()
 	pool.clear()
 	engine = _player(_engine_wave(int(st.cyl), 0.2), -60.0)
 	engine2 = _player(_engine_wave(int(st.cyl), 1.0), -60.0)
@@ -202,9 +226,9 @@ func update(delta: float, rpm: float, throttle: bool, alive: bool, slide: bool, 
 	elif not slide and squeal.playing:
 		squeal.stop()
 	if siren.playing:
-		siren.volume_db = linear_to_db(clamp(0.28 - cop_near / 500.0, 0.03, 0.28))
+		siren.volume_db = linear_to_db(clamp(0.28 - cop_near / 400.0, 0.0005, 0.28))
 
 func stop_all() -> void:
 	for c in get_children():
-		if c is AudioStreamPlayer:
+		if c is AudioStreamPlayer and c != ui_player:
 			c.stop()

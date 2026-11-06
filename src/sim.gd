@@ -5,7 +5,6 @@ class_name Sim extends RefCounted
 const RIDE := 0
 const DOWN := 1
 const WAIT := 2
-const GONE := 3
 
 const X2M := 7.2          # 2D game's road half-width in metres
 const REACH_M := 4.7      # 2D reach numbers to metres
@@ -65,7 +64,6 @@ class Rider:
 	var finished := false
 	var said := false
 	var out := false
-	var chase_t := 0.0
 	var down_t := 0.0
 	var down_dur := 2.0
 	# rider's own flight while the bike slides
@@ -93,6 +91,10 @@ class Rider:
 	var bustable := false
 	var last_hit := -99.0
 	var scrape_t := -99.0
+	var start_w := "none"
+	var start_gone := false
+	var target: Rider = null     # cop: who he is after
+	var retarget_t := 0.0
 	var last_side := 1
 	var fall_kmh := 0.0
 	var bot_lane := 1.8
@@ -147,7 +149,7 @@ var end_kind := ""
 var end_t := 0.0
 var next_atk := 0.0
 var say_at := 0.0
-var stats := {"ko": 0, "cop_ko": 0, "cop_gone": 0, "shifts": 0, "t_finish": 0.0}
+var stats := {"ko": 0, "cop_ko": 0, "shifts": 0, "t_finish": 0.0}
 var events: Array = []    # for sound and effects, drained by the view each frame
 var banner := ""
 var banner_bad := false
@@ -167,7 +169,7 @@ func show_banner(txt: String, bad := false) -> void:
 	banner_bad = bad
 	ev("banner", txt, bad)
 
-func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, cs := 0, ch := 0, seed_v := 1) -> void:
+func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, cs := 0, ch := 0, seed_v := 1, extra := {}) -> void:
 	track_i = track_index
 	tr = D.tracks[track_index]
 	rng.seed = seed_v
@@ -175,7 +177,9 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 	road = Road.new()
 	road.build(tr)
 	var b: Dictionary = D.bike_by_id[bike_id]
-	var st := D.rider_stats(b, upgrades, ts, th)
+	var glove: int = extra.get("glove", 0)
+	var boot: int = extra.get("boot", 0)
+	var st := D.rider_stats(b, upgrades, ts, th, glove, boot, extra.get("weapon", "none"))
 	me = Rider.new()
 	me.is_me = true
 	me.name = "Ты"
@@ -195,7 +199,8 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 	me.shift_len = st.shift
 	me.reach_k = st.reach_k
 	me.weapon = st.weapon
-	me.look = {"outfit": D.outfit(ts, cs, ch), "helmet": th, "paint": int(b.paint)}
+	me.start_w = st.weapon
+	me.look = {"outfit": D.outfit(ts, cs, ch, glove, boot), "helmet": th, "paint": int(extra.get("paint", b.paint))}
 	var roster: Array = tr.roster
 	for k in roster.size():
 		var e: Array = roster[k]
@@ -331,7 +336,7 @@ func _update_car(c: Car, dt: float) -> void:
 		obs_v = abs(l.v)
 	var reach: float = c.hw + 1.0
 	for r in riders:
-		if r.state == WAIT or r.state == GONE:
+		if r.state == WAIT:
 			continue
 		var fallen: bool = r.state == DOWN
 		var rv: float = r.v
@@ -559,7 +564,15 @@ func ko_foe(f: Rider, side: int, by_me: bool, why: String) -> void:
 	f.bike_rot = 0.0
 	f.push = side * 1.3 * X2M * 0.5
 	_launch(f, side)
-	ev("ko", f, why)
+	if abs(f.s - me.s) < 120.0:
+		ev("ko", f, why)
+	if f.is_cop:
+		var any_left := false
+		for c in cops:
+			if c.state == RIDE:
+				any_left = true
+		if not any_left:
+			ev("siren", false)
 	var mine := by_me or (t - f.hit_t < 2.5)
 	if mine and not f.is_cop:
 		stats.ko += 1
@@ -623,6 +636,9 @@ func lose_weapon() -> String:
 	var w := me.weapon
 	if w == "none":
 		return ""
+	if me.start_w == w and not me.start_gone:
+		me.start_gone = true
+		ev("stock", w)
 	me.weapon = "none"
 	ev("weapon")
 	return w
@@ -667,13 +683,64 @@ func crash(why: String, kmh_at := -1.0) -> void:
 		show_banner("Тебя вырубили", true)
 	ev("crash", why)
 
-func _start_chase(c: Rider) -> void:
+func _start_chase(c: Rider, who: Rider = null) -> void:
 	c.state = RIDE
-	c.chase_t = 0.0
-	c.v = max(c.v, me.v * 0.35)
+	c.target = who if who != null else me
+	c.v = max(c.v, c.target.v * 0.35)
 	c.lane = 5.4
-	show_banner("Сирена!", true)
+	if abs(c.s - me.s) < 150.0:
+		show_banner("Сирена!", true)
 	ev("siren", true)
+
+# Cops go for whichever racer is closest. Whoever just hit one gets his full attention.
+func _nearest_racer(f: Rider) -> Rider:
+	var best: Rider = null
+	var bd := 1e9
+	for r in riders:
+		if r.is_cop or r.state != RIDE or r.finished:
+			continue
+		if r.is_me and phase != "race":
+			continue
+		var dist: float = abs(r.s - f.s) + abs(r.d - f.d) * 0.5
+		if dist < bd:
+			bd = dist
+			best = r
+	return best
+
+func _pick_target(f: Rider) -> void:
+	if f.angry > 0.0 and me.state == RIDE and phase == "race":
+		f.target = me
+		return
+	var near := _nearest_racer(f)
+	if near == null:
+		f.target = null
+		return
+	var cur := f.target
+	var keep: bool = cur != null and cur.state == RIDE and not cur.finished and (not cur.is_me or phase == "race")
+	if keep:
+		var cur_d: float = abs(cur.s - f.s) + abs(cur.d - f.d) * 0.5
+		var near_d: float = abs(near.s - f.s) + abs(near.d - f.d) * 0.5
+		if cur_d < near_d + 5.0:
+			return
+	f.target = near
+
+func _cop_hit(f: Rider, tg: Rider, w: Dictionary, side: int) -> void:
+	if tg.inv > 0.0 or tg.state != RIDE:
+		return
+	var near_me: bool = abs(tg.s - me.s) < 120.0
+	tg.hp -= w.foe * tr.foeDmg * 1.2 * (1.0 - 0.5 * tg.prot)
+	tg.stun = 0.45
+	tg.flash = 0.12
+	tg.push += side * 2.5
+	if near_me:
+		ev("hit", tg, f.weapon)
+	if tg.hp <= 0.0:
+		ko_foe(tg, side, false, "")
+		# a rival the police knock off the bike stays with the police
+		tg.out = true
+		tg.down_dur = 1e9
+		if near_me:
+			show_banner("Коп взял: " + tg.name)
 
 func _say(f: Rider, chance: float) -> void:
 	if f.ch == null or rng.randf() > chance or t < say_at:
@@ -944,16 +1011,13 @@ func _update_foe(f: Rider, dt: float) -> void:
 	f.inv = max(0.0, f.inv - dt)
 	f.stun = max(0.0, f.stun - dt)
 	if f.state == WAIT:
-		if phase == "race" and m.s > f.s - 40.0 and m.state == RIDE:
-			_start_chase(f)
+		if phase == "race":
+			var near := _nearest_racer(f)
+			if near != null and near.s > f.s - 40.0 and near.s < f.s + 60.0:
+				_start_chase(f, near)
 		return
 	if f.s >= road.length - 20.0:
 		f.v = 0.0
-		return
-	if f.state == GONE:
-		f.v = max(0.0, f.v - v_top * 0.5 * dt)
-		f.s += f.v * dt
-		f.d = lerp(f.d, sign(f.d) * 9.4, min(1.0, dt))
 		return
 	if f.state == DOWN:
 		f.down_t += dt
@@ -975,7 +1039,18 @@ func _update_foe(f: Rider, dt: float) -> void:
 			f.vx = 0.0
 			f.bike_rot = 0.0
 		return
-	var dz: float = f.s - m.s
+	var tg: Rider = m
+	if f.is_cop:
+		f.retarget_t -= dt
+		if f.retarget_t <= 0.0 or f.target == null or f.target.state != RIDE:
+			f.retarget_t = 0.4
+			_pick_target(f)
+		if f.target == null:
+			f.v = max(0.0, f.v - v_top * 0.3 * dt)
+			f.s += f.v * dt
+			return
+		tg = f.target
+	var dz: float = f.s - tg.s
 	var adz: float = abs(dz)
 	var tgt: float
 	f.look_t -= dt
@@ -983,24 +1058,15 @@ func _update_foe(f: Rider, dt: float) -> void:
 		f.look_t = 0.2
 		f.lim = corner_limit(f.s, f.v, f.a_grip, f.a_brake, 0.9)
 	if f.is_cop:
-		f.chase_t += dt
-		tgt = max(m.v * (1.0 + clamp(-dz / 200.0, 0.05, 0.25)), v_top * 0.5)
-		if dz > 5.0:
-			tgt = max(m.v * 0.94, v_top * 0.3)
-		if m.state == DOWN and adz < BUST_M:
-			tgt = max(m.v, v_top * 0.3)
+		# closes up until he is right alongside, then holds there and swings. There is no timer: only a knockout stops him
+		tgt = max(0.0, tg.v + clamp(-dz * 0.8, -8.0, max(8.0, v_top * 0.35)))
 		tgt = min(tgt, f.lim)
-		if f.chase_t > tr.copChase:
-			f.state = GONE
-			stats.cop_gone += 1
-			show_banner("Коп отстал")
-			ev("siren", false)
-			return
 	else:
 		tgt = f.top * f.skill
 		tgt = min(tgt, f.lim)
-		if f.style == "brawler" and adz < 5.0 and m.state == RIDE:
-			tgt = min(tgt, max(m.v * 1.01, v_top * 0.3))
+		if f.style == "brawler" and adz < 12.0 and m.state == RIDE:
+			# comes alongside and stays there to fight
+			tgt = min(f.top * 1.07, max(m.v + clamp(-dz * 0.8, -5.0, 6.0), v_top * 0.2))
 		if f.style == "coward" and f.angry > 0.0:
 			tgt *= 1.06
 		if m.state == RIDE and dz < -2.0 and dz > -45.0 and (f.style == "brawler" or (f.style == "thief" and m.weapon != "none")):
@@ -1030,13 +1096,13 @@ func _update_foe(f: Rider, dt: float) -> void:
 	var tx: float = f.lane
 	f.angry = max(0.0, f.angry - dt)
 	var sty := "cop" if f.is_cop else f.style
-	var live := phase == "race" and m.state == RIDE and m.inv <= 0.0
-	var range_m: float = {"cop": 25.0, "brawler": 32.0, "thief": 32.0 if m.weapon != "none" else 12.0, "maniac": 15.0, "blocker": 13.0, "racer": 4.5, "calm": 4.5, "coward": 0.0}[sty]
+	var live := phase == "race" and tg.state == RIDE and tg.inv <= 0.0
+	var range_m: float = {"cop": 70.0, "brawler": 32.0, "thief": 32.0 if m.weapon != "none" else 12.0, "maniac": 15.0, "blocker": 13.0, "racer": 4.5, "calm": 4.5, "coward": 0.0}[sty]
 	if f.angry > 0.0 and sty != "coward":
 		range_m = max(range_m, 25.0)
 	if live and adz < range_m:
 		var hash_v := (f.name.length() * 7) % 3
-		tx = clamp(m.d + (-1.0 if f.d < m.d else 1.0) * (1.25 + hash_v * 0.3), -6.6, 6.6)
+		tx = clamp(tg.d + (-1.0 if f.d < tg.d else 1.0) * (1.25 + hash_v * 0.3), -6.6, 6.6)
 	if live and sty == "blocker" and dz > 2.5 and dz < 28.0:
 		tx = clamp(m.d, -6.6, 6.6)
 	if live and sty == "coward" and f.angry > 0.0 and adz < 30.0:
@@ -1091,7 +1157,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 			f.v *= 0.3
 			return
 	# shove with the player
-	if m.state == RIDE and adz < 2.2 and abs(f.d - m.d) < 1.0:
+	if tg.is_me and m.state == RIDE and adz < 2.2 and abs(f.d - m.d) < 1.0:
 		var sd := 1 if f.d >= m.d else -1
 		f.d += sd * 4.0 * dt
 		m.d -= sd * 2.5 * dt
@@ -1103,27 +1169,33 @@ func _update_foe(f: Rider, dt: float) -> void:
 		if not a.done and a.t >= 0.28:
 			a.done = true
 			var w := weapon_def(f.weapon)
-			if abs(f.s - m.s) < Z_REACH and abs(f.d - m.d) < w.reach * REACH_M * f.reach_k + 0.3:
-				var had := m.weapon
-				var could := m.inv <= 0.0 and m.state == RIDE and phase == "race"
-				hurt_me(w.foe * tr.foeDmg * (1.2 if f.is_cop else 1.0) * f.hit_mul, 1 if m.d >= f.d else -1)
-				if could:
-					_say(f, 0.35)
-				var steal: float = 0.25 if f.is_cop else (0.36 if f.style == "thief" else 0.12)
-				if could and m.state == RIDE and had != "none" and m.weapon == had and rng.randf() < steal:
-					var got := lose_weapon()
-					if not f.is_cop and not f.no_hand and weapon_def(got).rank >= weapon_def(f.weapon).rank:
-						f.weapon = got
-					show_banner("Отобрали " + str(weapon_def(got).acc), true)
+			if abs(f.s - tg.s) < Z_REACH and abs(f.d - tg.d) < w.reach * REACH_M * f.reach_k + 0.3:
+				if not tg.is_me:
+					_cop_hit(f, tg, w, 1 if tg.d >= f.d else -1)
+				else:
+					var had := m.weapon
+					var could := m.inv <= 0.0 and m.state == RIDE and phase == "race"
+					if could:
+						ev("hit", m, f.weapon)
+					hurt_me(w.foe * tr.foeDmg * (1.2 if f.is_cop else 1.0) * f.hit_mul, 1 if m.d >= f.d else -1)
+					if could:
+						_say(f, 0.35)
+					var steal: float = 0.25 if f.is_cop else (0.36 if f.style == "thief" else 0.12)
+					if could and m.state == RIDE and had != "none" and m.weapon == had and rng.randf() < steal:
+						var got := lose_weapon()
+						if not f.is_cop and not f.no_hand and weapon_def(got).rank >= weapon_def(f.weapon).rank:
+							f.weapon = got
+						show_banner("Отобрали " + str(weapon_def(got).acc), true)
 		if a.t > 0.48:
 			f.attack = null
-	elif f.cd <= 0.0 and phase == "race" and m.state == RIDE and m.inv <= 0.0 and adz < 2.6 and f.stun <= 0.0 and t >= next_atk:
+	elif f.cd <= 0.0 and phase == "race" and tg.state == RIDE and tg.inv <= 0.0 and adz < 2.6 and f.stun <= 0.0 and (t >= next_atk or not tg.is_me):
 		var calm_type: bool = sty == "racer" or sty == "calm" or sty == "coward"
 		if not (calm_type and f.angry <= 0.0) and not (sty == "coward" and rng.randf() < 0.7):
 			var w2 := weapon_def(f.weapon)
-			if abs(f.d - m.d) < w2.reach * REACH_M * f.reach_k:
-				next_atk = t + 0.8
-				f.attack = {"t": 0.0, "side": 1 if m.d >= f.d else -1, "done": false, "weapon": f.weapon, "type": "hand"}
+			if abs(f.d - tg.d) < w2.reach * REACH_M * f.reach_k:
+				if tg.is_me:
+					next_atk = t + 0.8
+				f.attack = {"t": 0.0, "side": 1 if tg.d >= f.d else -1, "done": false, "weapon": f.weapon, "type": "hand"}
 				f.cd = rng.randf_range(1.3, 2.6) * (1.6 - f.aggr * 0.6)
 	if not f.is_cop and not f.finished and f.s >= road.finish_s:
 		f.finished = true
