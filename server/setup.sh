@@ -87,7 +87,7 @@ say "Caddy"
 if grep -rqs 'gaz-api' /etc/caddy; then
   echo "Уже настроен"
 else
-  FILES=$( { echo "$CF"; grep -rlsF "$SITE" /etc/caddy 2>/dev/null; } | awk '!seen[$0]++')
+  FILES=$( { echo "$CF"; grep -rlsF "$SITE" /etc/caddy 2>/dev/null || true; } | awk '!seen[$0]++')
   PATCHED=""
   for F in $FILES; do
     [ -f "$F" ] || continue
@@ -130,6 +130,7 @@ PY
     echo "--- $CF"; cat "$CF"
     echo "--- /etc/caddy"; ls -la /etc/caddy
     echo "--- кто слушает 80 и 443"; ss -ltnp 2>/dev/null | grep -E ':(80|443) ' || true
+    echo "--- как запущен caddy"; ps -o args= -C caddy || true
     exit 1
   fi
   if ! caddy validate --config "$CF" --adapter caddyfile >/dev/null 2>&1; then
