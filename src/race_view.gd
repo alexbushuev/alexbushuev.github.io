@@ -16,10 +16,10 @@ var impact: CPUParticles3D
 var shake := 0.0
 var draw_dist := 480.0
 var cam_d := 1.8
-var cam_dist := 4.2
-var cam_h := 1.75
+var cam_dist := 5.0
+var cam_h := 2.5
 var cam_look_h := 1.0
-var fov_now := 62.0
+var fov_now := 56.0
 var cam_roll := 0.0
 var debug_close := false
 
@@ -31,6 +31,8 @@ func _particles(col: Color, size: float, life: float, amount: int, spread: float
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	m.albedo_color = col
+	if col.a < 1.0:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.vertex_color_use_as_albedo = false
 	q.material = m
 	p.mesh = q
@@ -52,7 +54,7 @@ func build(s: Sim) -> void:
 	sim = s
 	var tr: Dictionary = s.tr
 	var theme: Dictionary = D.themes[int(tr.theme)]
-	draw_dist = clamp(tr.kmh * 2.4 + 300.0, 420.0, 900.0)
+	draw_dist = clamp(s.v_top * 15.0, 450.0, 720.0)
 	world = World.new()
 	add_child(world)
 	world.build(s.road, theme, draw_dist)
@@ -70,7 +72,7 @@ func build(s: Sim) -> void:
 	_build_cars(theme)
 	sparks = _particles(Color(1.0, 0.75, 0.25), 0.06, 0.45, 26, 70.0, Vector2(3, 11), -9.0)
 	impact = _particles(Color(1.0, 0.9, 0.5), 0.09, 0.28, 14, 90.0, Vector2(2, 7), -3.0)
-	smoke = _particles(Color(0.8, 0.8, 0.85, 1.0), 0.5, 0.5, 6, 40.0, Vector2(0.5, 2), 1.0)
+	smoke = _particles(Color(0.85, 0.85, 0.88, 0.16), 0.45, 0.4, 5, 40.0, Vector2(0.5, 2), 1.0)
 	dust = _particles(Color(theme.grass[0]).lightened(0.2), 0.32, 0.4, 7, 60.0, Vector2(1, 4), -6.0)
 	world.update_visibility(s.me.s, draw_dist)
 
@@ -184,18 +186,18 @@ func _update_camera(delta: float) -> void:
 	var focus_s: float = me.fly_s if falling else me.s
 	var focus_d: float = me.fly_d if falling else me.d
 	cam_d += (focus_d * 0.82 - cam_d) * min(1.0, delta * 8.0)
-	var want_dist: float = lerp(3.9, 5.0, pct) + (1.8 if falling else 0.0)
+	var want_dist: float = lerp(4.8, 5.6, pct) + (1.8 if falling else 0.0)
 	cam_dist += (want_dist - cam_dist) * min(1.0, delta * 2.5)
 	var back: float = focus_s - cam_dist
 	var cp := sim.road.world(max(1.0, back), cam_d, cam_h + (0.6 if falling else 0.0))
-	var look_ahead: float = lerp(7.0, 12.0, pct)
+	var look_ahead: float = lerp(14.0, 20.0, pct)
 	var lp := sim.road.world(focus_s + look_ahead, lerp(cam_d, focus_d, 0.6) + me.psi * 2.0, cam_look_h)
 	if shake > 0.0:
 		shake = max(0.0, shake - delta * 1.1)
 		var sx := randf_range(-shake, shake)
 		var sy := randf_range(-shake, shake)
 		cp += Vector3(sx, sy, 0.0)
-	var want_roll: float = -me.lean * 0.16
+	var want_roll: float = -me.lean * 0.08
 	cam_roll += (want_roll - cam_roll) * min(1.0, delta * 5.0)
 	if debug_close:
 		var c0: Vector3 = sim.road.world(focus_s + 2.4, focus_d - 2.6, 1.5)
@@ -204,6 +206,6 @@ func _update_camera(delta: float) -> void:
 		return
 	cam.look_at_from_position(cp, lp, Vector3.UP)
 	cam.rotate_object_local(Vector3.BACK, cam_roll)
-	var want_fov: float = lerp(60.0, 80.0, pct * pct)
+	var want_fov: float = lerp(54.0, 62.0, pct * pct)
 	fov_now += (want_fov - fov_now) * min(1.0, delta * 3.0)
 	cam.fov = fov_now

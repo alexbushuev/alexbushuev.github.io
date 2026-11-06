@@ -6,7 +6,7 @@ const DS := 2.0
 const LANE_W := 3.6
 const HALF := 7.2
 const EDGE := 8.0
-const A_REF := 11.0  # m/s2 of grip the bends are designed around
+const A_REF := 8.0   # the bends leave a margin: a rider has about 11 m/s2 of grip, so they can be taken a little faster
 
 var pos := PackedVector3Array()
 var fwd := PackedVector3Array()
@@ -24,7 +24,7 @@ func curve_radius(c: float, tr: Dictionary) -> float:
 	# Same difficulty curve as the 2D game: what fraction of the league's top speed this bend allows.
 	var ck: float = tr.ck
 	var frac := sqrt(1.14 * 0.78 * 0.92 / (c * ck * 0.9))
-	var v: float = tr.kmh / 3.6 * frac
+	var v: float = D.world_speed(tr.kmh) * frac
 	return max(26.0, v * v / A_REF)
 
 var _rng: RandomNumberGenerator
@@ -55,7 +55,7 @@ func _curve(c: float, dir: int, ang: float, g: float, tr: Dictionary) -> int:
 		dir = -dir
 	var r: float = curve_radius(c, tr)
 	var k: float = dir / r
-	var ease_len: float = clamp(ang * r * 0.25, 18.0, 90.0)
+	var ease_len: float = clamp(ang * r * 0.4, 30.0, 120.0)
 	var hold: float = max(6.0, ang * r - ease_len)
 	_plan.append([ease_len, k, g])
 	_plan.append([hold, k, g])
@@ -69,7 +69,7 @@ func _curve(c: float, dir: int, ang: float, g: float, tr: Dictionary) -> int:
 func build(tr: Dictionary) -> void:
 	_rng = RandomNumberGenerator.new()
 	_rng.seed = int(tr.seed) * 7919
-	var v_top: float = tr.kmh / 3.6
+	var v_top: float = D.world_speed(tr.kmh)
 	var total: float = v_top * tr.sec
 	var c_max: float = tr.curve
 	_gmax = clamp(tr.hillH / 30.0 * 0.085, 0.02, 0.09)

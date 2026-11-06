@@ -2,7 +2,7 @@ extends Node
 # Screens: menu -> choose bike -> race -> result. Test build: no money or garage yet, those move over next.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 3
+const BUILD_NO := 4
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -10,7 +10,7 @@ var hud_layer: CanvasLayer
 var hud: Hud
 var menu: Control
 var overlay: Control
-var view_box: SubViewportContainer
+var view_rect: TextureRect
 var view_port: SubViewport
 var race_view: RaceView
 var audio: GameAudio
@@ -24,7 +24,8 @@ var font_small: FontFile
 var pending_track := 0
 var pending_bike := ""
 var fps_low_t := 0.0
-var shrink := 1
+var quality := 1.0
+var quality_max := -1.0
 var auto_mode := ""     # command line: screenshot tests
 
 func _font(lat: String, cyr: String) -> FontFile:
@@ -41,16 +42,21 @@ func _ready() -> void:
 	var th := Theme.new()
 	th.default_font = font_mid
 	th.default_font_size = 18
-	view_box = SubViewportContainer.new()
-	view_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	view_box.stretch = true
-	view_box.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	view_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(view_box)
+	# 3D draws into its own picture at real screen pixels and is laid under the interface
 	view_port = SubViewport.new()
-	view_port.handle_input_locally = false
 	view_port.own_world_3d = true
-	view_box.add_child(view_port)
+	view_port.handle_input_locally = false
+	view_port.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	view_port.msaa_3d = Viewport.MSAA_4X
+	add_child(view_port)
+	view_rect = TextureRect.new()
+	view_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	view_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	view_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	view_rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	view_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	view_rect.texture = view_port.get_texture()
+	add_child(view_rect)
 	hud_layer = CanvasLayer.new()
 	hud_layer.layer = 1
 	add_child(hud_layer)
@@ -75,11 +81,14 @@ func _ready() -> void:
 		_show_menu()
 
 func _fit_resolution() -> void:
-	# 3D draws at a low, chunky resolution on phones and the HUD stays sharp; also keeps the frame rate up
-	var h: float = DisplayServer.window_get_size().y
-	var target := 560.0 if OS.has_feature("web") or OS.has_feature("mobile") else 800.0
-	shrink = maxi(1, int(round(h / target)))
-	view_box.stretch_shrink = shrink
+	var win: Vector2i = DisplayServer.window_get_size()
+	if quality_max < 0.0:
+		var phone: bool = OS.has_feature("web_ios") or OS.has_feature("web_android") or OS.has_feature("mobile")
+		quality_max = 720.0 / max(win.y, 1) if phone else 1080.0 / max(win.y, 1)
+		quality_max = min(quality_max, 1.0)
+		quality = quality_max
+		view_port.msaa_3d = Viewport.MSAA_2X if phone else Viewport.MSAA_4X
+	view_port.size = Vector2i(max(16, int(win.x * quality)), max(16, int(win.y * quality)))
 
 # ---------- menu ----------
 func _clear_ui() -> void:
@@ -314,16 +323,15 @@ func _process(delta: float) -> void:
 	_adapt_quality(delta)
 
 func _adapt_quality(delta: float) -> void:
-	# if a phone struggles, drop the 3D resolution one notch rather than the frame rate
-	if OS.has_feature("web") or OS.has_feature("mobile"):
-		if Engine.get_frames_per_second() < 38 and sim.phase == "race":
-			fps_low_t += delta
-			if fps_low_t > 4.0 and shrink < 5:
-				shrink += 1
-				view_box.stretch_shrink = shrink
-				fps_low_t = 0.0
-		else:
+	# only if a device really struggles: a slightly softer picture rather than a stuttering game
+	if Engine.get_frames_per_second() < 36 and sim.phase == "race" and auto_mode == "":
+		fps_low_t += delta
+		if fps_low_t > 3.0 and quality > 0.45:
+			quality *= 0.85
+			_fit_resolution()
 			fps_low_t = 0.0
+	else:
+		fps_low_t = 0.0
 
 # ---------- screenshot test: the bot drives, frames get saved at chosen times ----------
 func _run_shots() -> void:

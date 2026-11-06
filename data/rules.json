@@ -68,6 +68,7 @@
    "sedan": 90,
    "van": 80,
    "truck": 70
-  }
+  },
+  "density": 0.7
  }
 }

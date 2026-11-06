@@ -38,7 +38,7 @@ func _lane(ti: int, b: String, frac: float) -> void:
 	var k: float = sim.me.st.steer
 	var pct: float = frac
 	var auth2d: float = 2.5 * k * (0.4 + 0.6 * min(1.0, pct * 1.4)) * (1.0 - 0.25 * pct)
-	print("  %-7s %3.0f km/h: 3D %.2f s | 2D %.2f s" % [b, sim.me.top * frac * 3.6, t, 0.5 / auth2d])
+	print("  %-7s %3.0f km/h on the dial: %.2f s | 2D %.2f s" % [b, sim.me.st.kmh * frac, t, 0.5 / auth2d])
 
 func _bend(ti: int, b: String) -> void:
 	var sim := _sim(ti, b)
@@ -56,4 +56,4 @@ func _bend(ti: int, b: String) -> void:
 			off_at = sim.t
 			break
 	var after: String = "%.1f s after bend starts" % (off_at - first_k) if off_at > 0.0 else "stayed on the road for 60 s"
-	print("  %-7s on %-6s: bend at %.0f s, off the road: %s at %.0f km/h" % [b, sim.tr.id, first_k, after, sim.me.v * 3.6])
+	print("  %-7s on %-6s: bend at %.0f s, off the road: %s at %.0f km/h" % [b, sim.tr.id, first_k, after, sim.dial(sim.me, sim.me.v)])

@@ -64,6 +64,11 @@ func stats_of(b: Dictionary, u: Dictionary) -> Dictionary:
 	}
 
 # Real units from here on: metres, seconds. grip and handling turn into lateral acceleration.
+# How fast the world really moves for a speedometer reading. Same as speedOf() in the 2D game:
+# 300 km/h on the dial crosses three road widths a second, not six. The dial keeps its numbers, the road stays readable.
+func world_speed(kmh: float) -> float:
+	return 9.72 + 0.1116 * kmh
+
 func grip_f(grip: float) -> float:
 	return 1.35 - 0.0075 * grip
 
@@ -85,8 +90,8 @@ func rider_stats(b: Dictionary, u: Dictionary, ts: int, th: int, glove := 0, boo
 	var kmh: float = s.kmh * (1.0 - aero_loss(fx.aero, s.kmh))
 	return {
 		"gears": int(c.gears), "shift": c.shift, "cyl": int(c.cyl), "idle": c.idle, "red": c.red,
-		"kmh": kmh, "top": kmh / 3.6, "accel": s.acc * (1.0 - weight_loss(fx.kg, s.hp)),
-		"a_grip": a_grip(s.grip, s.hand), "a_brake": a_brake(s.grip, kmh / 3.6), "off": 1.2 - 0.006 * s.grip,
+		"kmh": kmh, "top": world_speed(kmh), "accel": s.acc * (1.0 - weight_loss(fx.kg, s.hp)),
+		"a_grip": a_grip(s.grip, s.hand), "a_brake": a_brake(s.grip, world_speed(kmh)), "off": 1.2 - 0.006 * s.grip,
 		"grip_f": grip_f(s.grip), "steer": steer_k(s.hand), "dur": s.dur, "prot": fx.prot, "no_hand": fx.no_hand, "hit_k": fx.hit,
 		"cd_k": fx.cd_k, "reach_k": fx.reach_k, "fist": max(1, round((10 + 3 * glove) * fx.hit)),
 		"kick": max(1, round((9 + 3 * boot) * fx.kick)), "push": 1.0 + 0.15 * boot,

@@ -75,6 +75,7 @@ func _slow(name_s: String, ti: int, b: String, hold_v: float, behind: float, kmh
 			sim.inp.gas = true
 		else:
 			sim.me.v = hold_v
+		sim.me.d = lane
 		sim.step(dt)
 		tt += dt
 		for e in sim.events:
@@ -175,11 +176,12 @@ func _tail() -> void:
 	sim.me.d = 1.8
 	sim.me.v = 40.0
 	var c := _car(sim, 60.0, 1.8, 90.0)
-	c.v0 = 25.0
+	c.v0 = 16.0
 	sim.link_cars()
 	var why := []
 	for i in 400:
-		sim.me.v = 40.0 if sim.me.state == Sim.RIDE else sim.me.v
+		sim.me.v = 36.0 if sim.me.state == Sim.RIDE else sim.me.v
+		sim.me.d = 1.8 if sim.me.state == Sim.RIDE else sim.me.d
 		sim.step(1.0 / 60.0)
 		for e in sim.events:
 			if e[0] == "crash":
@@ -187,7 +189,7 @@ func _tail() -> void:
 		sim.events.clear()
 		if why.size() > 0:
 			break
-	_report("I ride into a car's tail at 144", why == ["car"], "outcome %s" % str(why))
+	_report("I ride square into a car's tail", why == ["car"], "outcome %s" % str(why))
 
 func _head() -> void:
 	var sim := _sim(4, "sapsan")
@@ -230,7 +232,7 @@ func _limits() -> void:
 		var top := {}
 		for c in sim.cars:
 			top[c.kind] = max(float(top.get(c.kind, 0.0)), c.v0 * 3.6)
-			if c.v0 * 3.6 > float(D.rules.traffic.max_kmh[c.kind]) + 0.01:
+			if c.v0 > D.world_speed(float(D.rules.traffic.max_kmh[c.kind])) + 0.01:
 				ok = false
 		line += "\n    %-7s %s" % [sim.tr.id, str(top)]
 	_report("L top speed by track and type", ok, line)

@@ -12,7 +12,7 @@ const REACH_M := 4.7      # 2D reach numbers to metres
 const Z_REACH := 3.0
 const BUST_M := 50.0
 const G := 9.81
-const STEER_F := 0.75     # steering and bend pull, relative to the 2D game. Only their ratio sets how fast a bend can be taken
+const STEER_F := 0.5      # steering and bend pull, relative to the 2D game. Only their ratio sets how fast a bend can be taken
 const LANES := [-5.4, -1.8, 1.8, 5.4]
 const MY_LANES := [1.8, 5.4]
 
@@ -157,6 +157,11 @@ var rng := RandomNumberGenerator.new()
 func ev(kind: String, a: Variant = null, b: Variant = null) -> void:
 	events.append([kind, a, b])
 
+# what the speedometer shows for a rider going at world speed v
+func dial(r: Rider, v: float) -> float:
+	var top_kmh: float = r.st.kmh if r.is_me else float(r.bike.kmh)
+	return v / max(1.0, r.top) * top_kmh
+
 func show_banner(txt: String, bad := false) -> void:
 	banner = txt
 	banner_bad = bad
@@ -166,7 +171,7 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 	track_i = track_index
 	tr = D.tracks[track_index]
 	rng.seed = seed_v
-	v_top = tr.kmh / 3.6
+	v_top = D.world_speed(tr.kmh)
 	road = Road.new()
 	road.build(tr)
 	var b: Dictionary = D.bike_by_id[bike_id]
@@ -211,7 +216,7 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 		f.max_hp = tr.foeHp * c.hp
 		f.hp = f.max_hp
 		f.bike = rb
-		f.top = (rb.kmh * (1.0 - D.aero_loss(fx.aero, rb.kmh))) / 3.6
+		f.top = D.world_speed(rb.kmh * (1.0 - D.aero_loss(fx.aero, rb.kmh)))
 		f.acc = rb.acc * (1.0 - D.weight_loss(fx.kg, rb.hp))
 		f.a_grip = D.a_grip(rb.grip, rb.hand)
 		f.a_brake = D.a_brake(rb.grip, f.top)
@@ -271,20 +276,21 @@ func _make_cars() -> void:
 		c.color = Color(CAR_COLS[r2.randi() % CAR_COLS.size()])
 		c.d = LANES[ln]
 		c.dir = 1 if ln >= 2 else -1
-		c.v0 = min(share * v_top, float(limits[c.kind]) / 3.6)
+		c.v0 = min(share * v_top, D.world_speed(float(limits[c.kind])))
 		c.v = c.dir * c.v0
 		# spread so that a rider at league speed meets them evenly through the race
 		c.s = road.start_s + zspan * e * (1.0 - c.dir * c.v0 / (v_top * 0.9))
 		cars.append(c)
 	var prev := -1
-	for k in int(tr.cars):
+	var total: int = int(round(float(tr.cars) * float(D.rules.traffic.density)))
+	for k in total:
 		var ln := 2 if r2.randf() < 0.5 else 3
 		if ln == prev and r2.randf() < 0.6:
 			ln = 5 - ln
 		prev = ln
-		var e: float = lerp(0.07, 0.96, float(k) / tr.cars) + r2.randf() * 0.015
+		var e: float = lerp(0.07, 0.96, float(k) / total) + r2.randf() * 0.015
 		add.call(ln, 0.5 if ln == 2 else 0.38, e)
-	var on := int(round(tr.cars * 0.8))
+	var on := int(round(total * 0.8))
 	for k in on:
 		var ln := 1 if r2.randf() < 0.55 else 0
 		var e: float = lerp(0.05, 0.98, float(k) / on) + r2.randf() * 0.02
@@ -383,6 +389,7 @@ func _safe_spawn(r: Rider) -> void:
 	r.s = ahead
 
 # Touching traffic. Told apart by where the contact happened, and nobody ever stays inside a car.
+# Only a square hit is a crash; clipping a corner or rubbing a side throws you off with a scratch.
 func _car_contact(dt: float) -> void:
 	var m := me
 	for c in cars:
@@ -390,20 +397,25 @@ func _car_contact(dt: float) -> void:
 		var dd: float = c.s - m.s
 		if abs(dd) >= halfs:
 			continue
-		var halfw: float = c.hw + 0.4
+		var halfw: float = c.hw + 0.3
 		var dw: float = c.d - m.d
 		if abs(dw) >= halfw:
 			continue
-		var kmh: float = m.v * 3.6
+		var kmh: float = dial(m, m.v)
+		var rel: float = m.v - c.v
+		var depth: float = halfw - abs(dw)
+		var glancing: bool = depth < 0.35
+		var from_end: bool = halfs - abs(dd) <= abs(rel) * dt * 1.6 + 0.08
 		if c.dir < 0:
+			if glancing:
+				_scrape(c, dw, rel)
+				continue
 			m.s = min(m.s, c.s - halfs)
 			m.v = 0.0
 			crash("head", kmh + min(60.0, abs(c.v) * 3.6))
 			return
-		var rel: float = m.v - c.v
-		var from_end: bool = halfs - abs(dd) <= abs(rel) * dt * 1.6 + 0.08
-		if from_end and dd > 0.0 and rel > 0.0:
-			# rode into its tail
+		if from_end and dd > 0.0 and rel > 0.0 and not glancing:
+			# rode square into its tail
 			m.s = c.s - halfs
 			m.v = max(0.0, c.v) * 0.4
 			crash("car", kmh)
@@ -413,29 +425,37 @@ func _car_contact(dt: float) -> void:
 			c.s = m.s - halfs
 			c.v = m.v
 			if -rel > 8.0:
-				crash("rear", -rel * 3.6)
+				crash("rear", dial(m, -rel))
 				return
 			m.v = min(m.top, m.v - rel * 0.5)
 			ev("bump")
 			continue
-		if abs(rel) > 12.0:
+		if abs(rel) > 22.0 and not glancing:
 			if dd <= 0.0 and rel < 0.0:
-				# swerved right into the path of a much faster car
 				c.s = m.s - halfs
 				c.v = m.v
-				crash("rear", -rel * 3.6)
+				crash("rear", dial(m, -rel))
 				return
 			m.v = max(0.0, c.v) * 0.4
 			crash("car", kmh)
 			return
-		# rubbing along its side: slide off, a scratch rather than a crash
-		var side: float = -1.0 if dw > 0.0 else 1.0
-		m.d = c.d + side * halfw
-		m.push = side * 3.0
-		if t - m.scrape_t > 0.5:
-			m.scrape_t = t
-			m.bike_hp = max(1.0, m.bike_hp - 2.0)
-			ev("scrape")
+		_scrape(c, dw, rel)
+
+func _scrape(c: Car, dw: float, rel: float) -> void:
+	var m := me
+	var side: float = -1.0 if dw > 0.0 else 1.0
+	m.d = c.d + side * (c.hw + 0.3)
+	m.push = side * 3.0
+	m.sv = 0.0
+	if rel > 0.0:
+		m.v = max(m.v * 0.85, c.v if c.dir > 0 else 0.0)
+	if t - m.scrape_t > 0.5:
+		m.scrape_t = t
+		m.bike_hp = max(1.0, m.bike_hp - 2.0 - abs(rel) * 0.15)
+		m.hp = max(1.0, m.hp - abs(rel) * 0.25)
+		m.last_hit = t
+		m.flash = 0.08
+		ev("scrape")
 
 # ---------- combat ----------
 func weapon_def(w: String) -> Dictionary:
@@ -525,7 +545,7 @@ func _hit_foe(f: Rider, a: Dictionary) -> void:
 		ko_foe(f, a.side, true, "")
 
 func ko_foe(f: Rider, side: int, by_me: bool, why: String) -> void:
-	var kmh := f.v * 3.6
+	var kmh := dial(f, f.v)
 	var knock := why == ""
 	var inj: float = kmh * D.rules.fall_k * (1.0 - f.prot) * (0.6 if knock else 1.0)
 	var health: float = 50.0 if knock else clamp(f.hp / f.max_hp * 100.0, 15.0, 100.0)
@@ -610,7 +630,7 @@ func lose_weapon() -> String:
 func crash(why: String, kmh_at := -1.0) -> void:
 	if me.state != RIDE or me.inv > 0.0 or phase != "race":
 		return
-	var kmh: float = me.v * 3.6 if kmh_at < 0.0 else kmh_at
+	var kmh: float = dial(me, me.v) if kmh_at < 0.0 else kmh_at
 	me.bustable = false
 	for c in cops:
 		if c.state == RIDE and abs(c.s - me.s) < BUST_M:
@@ -798,7 +818,7 @@ func _update_me(dt: float) -> void:
 		var auth: float = steer_auth(m)
 		if stopping:
 			steer = clamp((clamp(m.d, 1.8, 5.4) - m.d) * 0.55 + pull / max(1.0, auth), -1.0, 1.0)
-		m.sv += (steer - m.sv) * min(1.0, dt * 12.0)
+		m.sv += (steer - m.sv) * min(1.0, dt * 7.0)
 		var off: bool = abs(m.d) > Road.EDGE
 		var over: bool = abs(pull) > auth * 1.15
 		m.slide = abs(pull) > auth * 0.82 and m.v > top * 0.3
@@ -809,13 +829,13 @@ func _update_me(dt: float) -> void:
 		m.push *= exp(-5.0 * dt)
 		# what you see: the bike points where it is really going and leans for the turn it is actually making
 		var want_psi: float = atan2(lateral + m.push, max(4.0, m.v))
-		m.psi += (want_psi - m.psi) * min(1.0, dt * 12.0)
+		m.psi += (want_psi - m.psi) * min(1.0, dt * 9.0)
 		var v2: float = m.v * m.v
 		var a_req: float = v2 * road.kappa_at(m.s)
 		var q: float = bars / pull if abs(pull) > 0.5 else 0.0
 		var a_eff: float = a_req * clamp(q, -0.2, 1.25)
-		var want_lean: float = atan2(a_eff, G) + m.sv * 0.33 * (1.0 - min(1.0, abs(q)))
-		want_lean = clamp(want_lean, -0.95, 0.95) * clamp(m.v / 8.0, 0.0, 1.0)
+		var want_lean: float = atan2(a_eff, G) * 0.8 + m.sv * 0.24 * (1.0 - min(1.0, abs(q)))
+		want_lean = clamp(want_lean, -0.75, 0.75) * clamp(m.v / 8.0, 0.0, 1.0)
 		m.lean += (want_lean - m.lean) * min(1.0, dt * 10.0)
 		m.s += m.v * cos(m.psi) * dt
 		# pedals
@@ -837,7 +857,7 @@ func _update_me(dt: float) -> void:
 		if phase == "race" and m.inv <= 0.0:
 			_car_contact(dt)
 			if m.state == RIDE:
-				if off and pct > 0.62 and m.v * 3.6 > 110.0:
+				if off and pct > 0.62 and dial(m, m.v) > 110.0:
 					m.off_t += dt
 				else:
 					m.off_t = max(0.0, m.off_t - dt * 2.0)
@@ -1035,7 +1055,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 	if f.is_cop and abs(f.d) > 7.2:
 		tx = sign(f.d) * 5.6
 	var lat_max: float = max(1.5, f.v * 0.45)
-	var want: float = clamp(clamp(tx - f.d, -7.2, 7.2) * 2.0 * (0.72 + 0.006 * f.hand), -lat_max, lat_max)
+	var want: float = clamp(clamp(tx - f.d, -7.2, 7.2) * 1.5 * (0.72 + 0.006 * f.hand), -lat_max, lat_max)
 	f.vx += (want - f.vx) * min(1.0, dt * 5.0)
 	f.lat = f.vx + f.push
 	f.d = clamp(f.d + f.lat * dt, -12.4, 12.4)
@@ -1043,7 +1063,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 	f.s += f.v * dt
 	var k: float = road.kappa_at(f.s)
 	var a_lat: float = clamp(f.v * f.v * k, -f.a_grip, f.a_grip) + f.vx * 3.5
-	f.lean += (atan2(a_lat, G) * clamp(f.v / 8.0, 0.0, 1.0) - f.lean) * min(1.0, dt * 8.0)
+	f.lean += (clamp(atan2(a_lat, G) * 0.8, -0.75, 0.75) * clamp(f.v / 8.0, 0.0, 1.0) - f.lean) * min(1.0, dt * 8.0)
 	f.psi = atan2(f.vx, max(4.0, f.v))
 	f.rpm = clamp(f.v / max(1.0, f.top), 0.2, 1.0)
 	# crashes

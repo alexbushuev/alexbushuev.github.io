@@ -148,7 +148,7 @@ func _draw() -> void:
 	var me := sim.me
 	var w: float = size.x
 	var h: float = size.y
-	var kmh: int = int(round(me.v * 3.6))
+	var kmh: int = int(round(sim.dial(me, me.v)))
 	var pad := 12.0
 	# speed, gear, rev strip, at top centre
 	var cx := w * 0.5

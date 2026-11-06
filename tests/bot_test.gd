@@ -81,5 +81,5 @@ func _race(d: Node, ti: int, bid: String, seed_v: int, peace: bool) -> void:
 		if f.state == Sim.DOWN:
 			ko_foes += 1
 	print("%-7s %-9s seed%d | %-6s place %d/%d t=%3.0fs len=%4.0fm | top %3.0f avg %3.0f slow-bend %3.0f km/h (bike %3.0f) | falls %d %s hp%3.0f bk%3.0f | KO %d inside %d pile %d car %3.0f" % [
-		d.tracks[ti].id, bid, seed_v, sim.end_kind, place, 8, sim.t, sim.road.finish_s, maxv * 3.6, sum_v / max(1, n) * 3.6,
-		min_k_v * 3.6, sim.me.top * 3.6, sim.me.falls, str(why), sim.me.hp, sim.me.bike_hp, sim.stats.ko, inside, pile, max_car * 3.6])
+		d.tracks[ti].id, bid, seed_v, sim.end_kind, place, 8, sim.t, sim.road.finish_s, sim.dial(sim.me, maxv), sim.dial(sim.me, sum_v / max(1, n)),
+		sim.dial(sim.me, min_k_v), sim.me.st.kmh, sim.me.falls, str(why), sim.me.hp, sim.me.bike_hp, sim.stats.ko, inside, pile, max_car * 3.6])

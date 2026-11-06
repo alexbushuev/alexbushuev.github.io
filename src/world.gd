@@ -117,7 +117,11 @@ func _make_environment(t: Dictionary, draw_dist: float) -> WorldEnvironment:
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	env.fog_enabled = true
 	env.fog_light_color = Color(t.fog)
-	env.fog_density = 3.6 / draw_dist
+	env.fog_mode = Environment.FOG_MODE_DEPTH
+	env.fog_depth_begin = draw_dist * 0.5
+	env.fog_depth_end = draw_dist
+	env.fog_depth_curve = 1.0
+	env.fog_density = 1.0
 	env.fog_sky_affect = 0.0
 	var we := WorldEnvironment.new()
 	we.environment = env
