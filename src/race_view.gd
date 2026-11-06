@@ -17,11 +17,12 @@ var shake := 0.0
 var draw_dist := 480.0
 var cam_d := 1.8
 var cam_dist := 5.0
-var cam_h := 2.5
-var cam_look_h := 1.0
+var cam_h := 2.7
+var cam_look_h := -0.2
 var fov_now := 56.0
 var cam_roll := 0.0
 var debug_close := false
+var last_path := 0
 
 func _particles(col: Color, size: float, life: float, amount: int, spread: float, vel: Vector2, grav: float) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
@@ -79,7 +80,7 @@ func build(s: Sim) -> void:
 func _add_bike(r: Sim.Rider) -> BikeView:
 	var v := BikeView.new()
 	add_child(v)
-	v.setup(r, sim.road)
+	v.setup(r, sim)
 	views.append(v)
 	return v
 
@@ -135,36 +136,36 @@ func handle_event(e: Array) -> void:
 	match e[0]:
 		"hit":
 			var f: Sim.Rider = e[1]
-			_fx(impact, sim.road.world(f.s, f.d, 1.25))
+			_fx(impact, sim.rd(f).world(f.s, f.d, 1.25))
 			shake = max(shake, 0.05)
 		"ko":
 			var f2: Sim.Rider = e[1]
-			_fx(sparks, sim.road.world(f2.s, f2.d, 0.5))
+			_fx(sparks, sim.rd(f2).world(f2.s, f2.d, 0.5))
 		"crash":
-			_fx(sparks, sim.road.world(sim.me.s, sim.me.d, 0.4))
+			_fx(sparks, sim.rd(sim.me).world(sim.me.s, sim.me.d, 0.4))
 			shake = 0.42
 		"hurt":
 			shake = max(shake, 0.16)
 		"scrape":
-			_fx(sparks, sim.road.world(sim.me.s, sim.me.d, 0.5))
+			_fx(sparks, sim.rd(sim.me).world(sim.me.s, sim.me.d, 0.5))
 			shake = max(shake, 0.12)
 		"bump":
 			shake = max(shake, 0.1)
 		"dust":
 			if Engine.get_process_frames() % 6 == 0:
-				_fx(dust, sim.road.world(sim.me.s, sim.me.d, 0.1))
+				_fx(dust, sim.rd(sim.me).world(sim.me.s, sim.me.d, 0.1))
 
 func _process(delta: float) -> void:
 	if sim == null or cam == null or car_nodes.size() != sim.cars.size() or impact == null:
 		return
 	var me := sim.me
-	world.update_visibility(me.s, draw_dist)
+	world.update_visibility(me.ps, draw_dist)
 	for v in views:
-		v.refresh(delta, me.s)
+		v.refresh(delta, me.ps)
 	for i in sim.cars.size():
 		var c: Sim.Car = sim.cars[i]
 		var node: MeshInstance3D = car_nodes[i]
-		var dist: float = abs(c.s - me.s)
+		var dist: float = abs(c.s - me.ps)
 		var vis: bool = dist < draw_dist * 0.85 and c.s > 2.0 and c.s < sim.road.length - 2.0
 		node.visible = vis
 		if vis:
@@ -176,22 +177,29 @@ func _process(delta: float) -> void:
 			brake_nodes[i].visible = c.braking
 	# slide smoke
 	if me.state == Sim.RIDE and me.slide and Engine.get_process_frames() % 5 == 0:
-		_fx(smoke, sim.road.world(me.s - 0.6, me.d, 0.1))
+		_fx(smoke, sim.rd(me).world(me.s - 0.6, me.d, 0.1))
 	_update_camera(delta)
 
 func _update_camera(delta: float) -> void:
 	var me := sim.me
 	var pct: float = me.v / max(1.0, me.top)
 	var falling := me.state == Sim.DOWN
-	var focus_s: float = me.fly_s if falling else me.s
-	var focus_d: float = me.fly_d if falling else me.d
+	var on: Road = sim.rd(me)
+	# onto or off a side road: d is now measured from another centreline, keep the camera where it was
+	if me.path != last_path:
+		var b: Road = sim.road.branches[(me.path if me.path != 0 else last_path) - 1]
+		cam_d += (-1.0 if me.path != 0 else 1.0) * b.side * 5.4
+		last_path = me.path
+	# down: keep both the rider and his bike in the picture while he runs back to it
+	var focus_s: float = (me.fly_s + me.s) * 0.5 if falling else me.s
+	var focus_d: float = (me.fly_d + me.d) * 0.5 if falling else me.d
 	cam_d += (focus_d * 0.82 - cam_d) * min(1.0, delta * 8.0)
-	var want_dist: float = lerp(4.8, 5.6, pct) + (1.8 if falling else 0.0)
+	var want_dist: float = lerp(4.8, 5.6, pct) + (2.2 + min(9.0, abs(me.fly_s - me.s) * 0.6) if falling else 0.0)
 	cam_dist += (want_dist - cam_dist) * min(1.0, delta * 2.5)
 	var back: float = focus_s - cam_dist
-	var cp := sim.road.world(max(1.0, back), cam_d, cam_h + (0.6 if falling else 0.0))
+	var cp := on.world(back if me.path != 0 else max(1.0, back), cam_d, cam_h + (0.6 if falling else 0.0))
 	var look_ahead: float = lerp(14.0, 20.0, pct)
-	var lp := sim.road.world(focus_s + look_ahead, lerp(cam_d, focus_d, 0.6) + me.psi * 2.0, cam_look_h)
+	var lp := on.world(focus_s + look_ahead, lerp(cam_d, focus_d, 0.6) + me.psi * 2.0, cam_look_h)
 	if shake > 0.0:
 		shake = max(0.0, shake - delta * 1.1)
 		var sx := randf_range(-shake, shake)
@@ -200,8 +208,8 @@ func _update_camera(delta: float) -> void:
 	var want_roll: float = -me.lean * 0.08
 	cam_roll += (want_roll - cam_roll) * min(1.0, delta * 5.0)
 	if debug_close:
-		var c0: Vector3 = sim.road.world(focus_s + 2.4, focus_d - 2.6, 1.5)
-		cam.look_at_from_position(c0, sim.road.world(focus_s, focus_d, 0.8), Vector3.UP)
+		var c0: Vector3 = on.world(focus_s + 2.4, focus_d - 2.6, 1.5)
+		cam.look_at_from_position(c0, on.world(focus_s, focus_d, 0.8), Vector3.UP)
 		cam.fov = 45.0
 		return
 	cam.look_at_from_position(cp, lp, Vector3.UP)

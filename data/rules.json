@@ -70,5 +70,8 @@
    "truck": 70
   },
   "density": 0.7
- }
+ },
+ "fall_cap": 60,
+ "track_k": 1.5,
+ "run_v": 6.0
 }

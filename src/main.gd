@@ -2,7 +2,7 @@ extends Node
 # Screens: menu, garage, shop, bar, start screen, race, result.
 
 const STEP := 1.0 / 60.0
-const BUILD_NO := 7
+const BUILD_NO := 8
 const TEST_GEAR := [[2, 2], [4, 2], [4, 3]]
 
 var ui_layer: CanvasLayer
@@ -12,6 +12,8 @@ var menu: Control
 var overlay: Control
 var view_rect: TextureRect
 var view_port: SubViewport
+var mirror_vp: SubViewport
+var mirror_cam: Camera3D
 var race_view: RaceView
 var room: Showroom
 var audio: GameAudio
@@ -78,6 +80,10 @@ func _ready() -> void:
 	add_child(audio)
 	audio.apply_settings()
 	get_viewport().size_changed.connect(_fit_resolution)
+	# progress came from the server (another device, or a log-in): the menu shows it at once
+	N.save_replaced.connect(func() -> void:
+		if not running and room == null and menu.get_child_count() > 0 and menu.get_child(menu.get_child_count() - 1) is MarginContainer:
+			_show_menu())
 	_fit_resolution()
 	var args := OS.get_cmdline_user_args()
 	if args.size() >= 2 and args[0] == "ui":
@@ -159,11 +165,19 @@ func _show_menu() -> void:
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(sp)
 	head.add_child(_label(S.fmt(S.data.money), font_big, 24, UiKit.PAPER))
-	head.add_child(_button("Гараж", _open_garage.bind(""), UiKit.YEL, UiKit.INK))
-	head.add_child(_button("Магазин", _open_shop.bind(-1, ""), UiKit.PAPER, UiKit.INK))
-	head.add_child(_button("Бар", _open_bar.bind(-1), Color("#7a1f3d"), UiKit.PAPER))
-	head.add_child(_button("Настройки", _open_settings, UiKit.INK3, UiKit.PAPER))
+	var acc := _button(N.login if N.logged_in() else "Войти", _open_account, UiKit.INK3 if N.logged_in() else UiKit.GRN, UiKit.PAPER)
+	head.add_child(acc)
 	v.add_child(head)
+	var nav := HBoxContainer.new()
+	nav.add_theme_constant_override("separation", 6)
+	for x in [["Гараж", _open_garage.bind(""), UiKit.YEL, UiKit.INK], ["Магазин", _open_shop.bind(-1, ""), UiKit.PAPER, UiKit.INK],
+			["Бар", _open_bar.bind(-1), Color("#7a1f3d"), UiKit.PAPER], ["Рекорды", _open_records.bind(-1), Color("#1f4fb8"), UiKit.PAPER],
+			["Настройки", _open_settings, UiKit.INK3, UiKit.PAPER]]:
+		var nb := _button(x[0], x[1], x[2], x[3])
+		nb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nb.custom_minimum_size = Vector2(0, 36)
+		nav.add_child(nb)
+	v.add_child(nav)
 	var list := ScrollList.new()
 	v.add_child(list)
 	for c in D.leagues.size():
@@ -221,6 +235,28 @@ func _show_menu() -> void:
 		S.add_test_money()
 		_show_menu(), UiKit.INK2, UiKit.MUTED, 13))
 	list.box.add_child(tests)
+
+func _open_account() -> void:
+	_clear_ui()
+	_bg(UiKit.INK)
+	var ui := AccountUi.new()
+	menu.add_child(ui)
+	ui.open()
+	ui.close_requested.connect(_show_menu)
+
+func _open_records(lg: int) -> void:
+	_clear_ui()
+	_bg(UiKit.INK)
+	var ui := RecordsUi.new()
+	menu.add_child(ui)
+	var start: int = lg
+	if start < 0:
+		start = 0
+		for c in D.leagues.size():
+			if S.cat_open(c):
+				start = c
+	ui.open(start)
+	ui.close_requested.connect(_show_menu)
 
 func _open_settings() -> void:
 	settings_open = true
@@ -325,6 +361,7 @@ func _launch_race(track_i: int, bike_id: String, u: Dictionary, ts: int, th: int
 	hud.sim = sim
 	hud.pause_pressed.connect(_toggle_pause)
 	audio.setup(sim.me.st)
+	_make_mirror()
 	_clear_ui()
 	running = true
 	paused = false
@@ -332,8 +369,47 @@ func _launch_race(track_i: int, bike_id: String, u: Dictionary, ts: int, th: int
 	if auto_mode == "shot":
 		_run_shots()
 
+# The rear view: a small second camera in the same world, drawn every other frame
+func _make_mirror() -> void:
+	if mirror_vp != null:
+		mirror_vp.queue_free()
+		mirror_vp = null
+	if not S.data.get("mirrors", true):
+		hud.mirror_tex = null
+		return
+	mirror_vp = SubViewport.new()
+	mirror_vp.size = Vector2i(320, 92)
+	mirror_vp.world_3d = view_port.find_world_3d()
+	mirror_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	mirror_vp.msaa_3d = Viewport.MSAA_DISABLED
+	add_child(mirror_vp)
+	mirror_cam = Camera3D.new()
+	mirror_cam.fov = 38.0
+	mirror_cam.near = 0.3
+	mirror_cam.far = 190.0
+	mirror_vp.add_child(mirror_cam)
+	mirror_cam.current = true
+	hud.mirror_tex = mirror_vp.get_texture()
+
+func _update_mirror() -> void:
+	if mirror_vp == null or mirror_cam == null:
+		return
+	var me := sim.me
+	var on: Road = sim.rd(me)
+	var s_now: float = me.s if me.state == Sim.RIDE else me.fly_s
+	var d_now: float = me.d if me.state == Sim.RIDE else me.fly_d
+	var p := on.world(s_now - 1.3, d_now, 1.35)
+	var back := on.world(s_now - 40.0, d_now * 0.7, 0.9)
+	mirror_cam.look_at_from_position(p, back, Vector3.UP)
+	# every other frame is plenty for a mirror, and halves what it costs
+	mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE if Engine.get_process_frames() % 2 == 0 else SubViewport.UPDATE_DISABLED
+
 func _end_race_nodes() -> void:
 	running = false
+	if mirror_vp != null:
+		mirror_vp.queue_free()
+		mirror_vp = null
+		mirror_cam = null
 	if race_view != null:
 		race_view.queue_free()
 		race_view = null
@@ -378,6 +454,9 @@ func _quit_to_menu() -> void:
 func _show_result(kind: String) -> void:
 	audio.stop_all()
 	var res := S.finish_race(sim, kind)
+	res["time"] = sim.stats.t_finish if kind == "finish" else -1.0
+	res["cat"] = int(sim.tr.cat)
+	N.send_result(sim, kind)
 	_result_screen(res)
 
 func _result_screen(res: Dictionary) -> void:
@@ -393,7 +472,31 @@ func _result_screen(res: Dictionary) -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 6)
 	m.add_child(v)
-	v.add_child(_label(res.title, font_big, 40, UiKit.RED if res.bad else UiKit.YEL))
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 16)
+	title_row.add_child(_label(res.title, font_big, 40, UiKit.RED if res.bad else UiKit.YEL))
+	if float(res.get("time", -1.0)) > 0.0:
+		title_row.add_child(_label(Hud.race_time(float(res.time)), font_big, 32, UiKit.PAPER))
+	var rec_l := _label("", font_mid, 16, UiKit.YEL)
+	rec_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	title_row.add_child(rec_l)
+	if res.get("time", -1.0) > 0.0 and not N.logged_in():
+		rec_l.text = "Войди в аккаунт, и время попадёт в рекорды"
+		rec_l.add_theme_color_override("font_color", UiKit.MUTED)
+	elif N.logged_in():
+		rec_l.text = "Отправляю…"
+		N.result_answer.connect(func(d: Dictionary) -> void:
+			if not is_instance_valid(rec_l):
+				return
+			if d.has("error"):
+				rec_l.text = "Не отправилось: " + str(d.error) + (", отправлю позже" if N.pending.size() > 0 else "")
+			elif d.get("best", false):
+				rec_l.text = "Новый личный рекорд, %d место в таблице" % int(d.rank)
+			elif d.get("rank") != null:
+				rec_l.text = "В таблице ты %d-й" % int(d.rank)
+			else:
+				rec_l.text = "Нокауты записаны в таблицу бойцов", CONNECT_ONE_SHOT)
+	v.add_child(title_row)
 	v.add_child(UiKit.label(res.text, font_mid, 16, UiKit.PAPER, true))
 	if res.note != "":
 		v.add_child(UiKit.label(res.note, font_mid, 15, UiKit.YEL, true))
@@ -430,7 +533,7 @@ func _result_screen(res: Dictionary) -> void:
 		b.custom_minimum_size = Vector2(0, 44)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(b)
-	for x in [["Ещё раз", _begin.bind(pending_track)], ["Гараж", _open_garage.bind("")], ["В меню", _show_menu]]:
+	for x in [["Ещё раз", _begin.bind(pending_track)], ["Гараж", _open_garage.bind("")], ["Рекорды", _open_records.bind(int(res.get("cat", 0)))], ["В меню", _show_menu]]:
 		var b2 := _button(x[0], x[1], UiKit.INK3, UiKit.PAPER, 18)
 		b2.custom_minimum_size = Vector2(0, 44)
 		b2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -485,8 +588,9 @@ func _process(delta: float) -> void:
 	var near := 1e9
 	for c in sim.cops:
 		if c.state == Sim.RIDE:
-			near = min(near, abs(c.s - sim.me.s))
+			near = min(near, abs(c.ps - sim.me.ps))
 	audio.update(delta, sim.me.rpm, sim.me.gas_on, sim.me.state == Sim.RIDE, sim.me.slide and sim.phase == "race", near)
+	_update_mirror()
 	_adapt_quality(delta)
 
 func _adapt_quality(delta: float) -> void:
@@ -517,6 +621,9 @@ func _run_shots() -> void:
 		return
 	if mode == "cop":
 		await _cop_shots(out)
+		return
+	if mode == "tour":
+		await _tour_shots(out)
 		return
 	var times: Array = str(args[4]).split(",")
 	var i := 0
@@ -569,10 +676,26 @@ func _pose_shots(out: String) -> void:
 		sim.step(STEP)
 	sim.events.clear()
 	await snap.call("fly")
-	for k in 120:
+	for k in 40:
 		sim.step(STEP)
 	sim.events.clear()
 	await snap.call("down")
+	# back on his feet, running to the bike, lifting it
+	race_view.debug_close = false
+	var shots := {1: "getup", 2: "run", 3: "lift"}
+	var taken := {}
+	for k in 600:
+		sim.step(STEP)
+		sim.events.clear()
+		var ph: int = me.run_phase
+		if me.state == Sim.DOWN and shots.has(ph) and not taken.has(ph) and me.run_t > (0.25 if ph != 2 else 0.3):
+			taken[ph] = true
+			for j in 3:
+				await get_tree().process_frame
+			await snap.call(shots[ph])
+		if me.state == Sim.RIDE:
+			break
+	print("back on the bike after %.1f s, down at %.0f m, body at %.0f m" % [me.down_t, me.s, me.fly_s])
 	get_tree().quit()
 
 func _brake_shots(out: String) -> void:
@@ -670,6 +793,46 @@ func _ui_shots(out: String) -> void:
 	await snap.call("bar4")
 	_result_screen({"title": "2 место", "text": "Призовое место на трассе Дачи.", "note": "Открыта трасса Рисовые поля.", "bad": false, "finished": true, "rows": ["Гвоздь", "Ты", "Хром", "Мазут", "Рыжий", "Валера", "Сиплый, сход", "Карбюратор"], "ledger": [["Приз за 2 место", 240], ["Нокауты × 2", 48], ["Коп вырублен", 100], ["Ремонт", -30]], "money": 1358, "next": 1})
 	await snap.call("result")
+	get_tree().quit()
+
+# Puts the rider in front of every new thing on the track and takes a picture: tunnels, overpasses, side roads
+func _tour_shots(out: String) -> void:
+	sim.bot_peace = true
+	for k in 240:
+		sim.step(STEP)
+	sim.events.clear()
+	var me := sim.me
+	var spots: Array = []
+	for f in sim.road.features:
+		match f.kind:
+			"tunnel":
+				spots.append(["tunnel_in", 0, float(f.s_a) - 70.0, 1.8])
+				spots.append(["tunnel_mid", 0, float(f.s_a) + 60.0, 1.8])
+			"bridge":
+				spots.append(["bridge", 0, float(f.s) - 45.0, 0.6])
+	for i in sim.road.branches.size():
+		var b: Road = sim.road.branches[i]
+		var kind: String = b.kind
+		spots.append([kind + "_sign", 0, b.s0 - 120.0, b.side * 5.4])
+		spots.append([kind + "_split", 0, b.s0 - 30.0, b.side * 5.4])
+		spots.append([kind + "_on", i + 1, b.length * 0.4, 0.0])
+	var n := 0
+	for sp in spots:
+		me.path = sp[1]
+		me.s = sp[2]
+		me.d = sp[3]
+		me.v = 6.0
+		me.state = Sim.RIDE
+		me.inv = 5.0
+		sim._calc_ps(me)
+		race_view.cam_d = me.d
+		race_view.last_path = me.path
+		for k in 12:
+			sim.events.clear()
+			me.v = 6.0
+			await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png("%s_%02d_%s.png" % [out, n, sp[0]])
+		n += 1
 	get_tree().quit()
 
 func _cop_shots(out: String) -> void:

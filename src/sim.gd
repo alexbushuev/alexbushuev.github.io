@@ -69,6 +69,15 @@ class Rider:
 	var out := false
 	var down_t := 0.0
 	var down_dur := 2.0
+	var life := 100.0           # a rival's health across falls; at zero he is out of the race
+	var run_phase := 0          # after a fall: 0 flying or lying, 1 getting up, 2 running to the bike, 3 lifting it
+	var run_t := 0.0
+	var run_side := 1.0         # which side of the bike he stands to lift it
+	var lie_t := 0.0
+	var bike_side := 1.0        # which side the bike lies on
+	var path := 0               # 0 the main road, i + 1 side road i
+	var ps := 0.0               # how far along the race, in main-road metres, whatever road he is on
+	var take := {}              # side road i -> will he take it
 	# rider's own flight while the bike slides
 	var fly_s := 0.0
 	var fly_d := 0.0
@@ -159,9 +168,70 @@ var banner := ""
 var banner_bad := false
 var say_txt := ""
 var rng := RandomNumberGenerator.new()
+var bot_branch := ""      # test bot at a fork: "" stays on the main road, "take" takes every side road
 
 func ev(kind: String, a: Variant = null, b: Variant = null, c: Variant = null) -> void:
 	events.append([kind, a, b, c])
+
+# ---------- which road a rider is on ----------
+func rd(r: Rider) -> Road:
+	return road if r.path == 0 else road.branches[r.path - 1]
+
+func _calc_ps(r: Rider) -> void:
+	r.ps = r.s if r.path == 0 else road.branch_prog(r.path - 1, r.s)
+
+func gravel(r: Rider) -> bool:
+	return r.path != 0 and rd(r).kind == "cut"
+
+func _wants_branch(r: Rider, i: int) -> bool:
+	if r.is_me:
+		return false
+	if r.is_cop:
+		return r.target != null and r.target.path == i + 1
+	return bool(r.take.get(i, false))
+
+# Through the junction: whoever passes the split in the outer lane on that side goes down the side road.
+func _update_path(r: Rider, prev_s: float) -> void:
+	if r.path == 0:
+		for i in road.branches.size():
+			var b: Road = road.branches[i]
+			if prev_s < b.s0 and r.s >= b.s0 and r.d * b.side > 3.6:
+				r.path = i + 1
+				r.s -= b.s0
+				r.d -= b.side * 5.4
+				r.lane = clamp(r.d, -b.half + 0.8, b.half - 0.8)
+				if r.is_me:
+					show_banner("Срезка" if b.kind == "cut" else "Объезд")
+				break
+	else:
+		var b2: Road = rd(r)
+		if r.s >= b2.length:
+			r.s = b2.s1 + (r.s - b2.length)
+			r.d += b2.side * 5.4
+			r.lane = clamp(r.d, -5.4, 5.4)
+			r.path = 0
+	_calc_ps(r)
+
+# the side road ahead on the main road, for the hint and for riders who want it
+func branch_ahead(r: Rider, within: float) -> int:
+	if r.path != 0:
+		return -1
+	for i in road.branches.size():
+		var dd: float = road.branches[i].s0 - r.s
+		if dd > 0.0 and dd < within:
+			return i
+	return -1
+
+func branch_hint() -> String:
+	var i := branch_ahead(me, 280.0)
+	if i < 0:
+		return ""
+	var b: Road = road.branches[i]
+	var dist: float = b.s0 - me.s
+	if dist < 25.0:
+		return ""
+	var what := "Срезка: гравий и ямы" if b.kind == "cut" else "Объезд: без машин"
+	return ("%s, правый ряд → %d м" if b.side > 0 else "← левый ряд, %s %d м") % ([what, int(round(dist / 10.0) * 10.0)] if b.side > 0 else [what.to_lower(), int(round(dist / 10.0) * 10.0)])
 
 # what the speedometer shows for a rider going at world speed v
 func dial(r: Rider, v: float) -> float:
@@ -190,6 +260,7 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 	me.st = st
 	me.bike = b
 	me.s = road.start_s
+	me.ps = me.s
 	me.d = 1.8
 	me.top = st.top
 	me.acc = st.accel
@@ -225,6 +296,10 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 		f.d = 5.4 if (k == 6 or k % 2 == 0) else 1.8
 		f.lane = f.d
 		f.max_hp = tr.foeHp * c.hp
+		# who takes the side roads: the fast and the reckless take the shortcut, the careful stay on the main road
+		var p_cut: float = {"maniac": 0.85, "racer": 0.7, "thief": 0.55, "brawler": 0.45, "blocker": 0.3, "calm": 0.2, "coward": 0.25}.get(c.style, 0.4)
+		for bi in road.branches.size():
+			f.take[bi] = rng.randf() < (p_cut if road.branches[bi].kind == "cut" else 0.45)
 		f.hp = f.max_hp
 		f.bike = rb
 		f.top = D.world_speed(rb.kmh * (1.0 - D.aero_loss(fx.aero, rb.kmh)))
@@ -256,6 +331,8 @@ func setup(track_index: int, bike_id: String, upgrades := {}, ts := 2, th := 2, 
 		c2.is_cop = true
 		c2.state = WAIT
 		c2.s = road.finish_s * fr
+		while road.in_branch_zone(c2.s, 160.0):
+			c2.s += 120.0
 		c2.d = 9.2
 		c2.max_hp = tr.copHp
 		c2.hp = c2.max_hp
@@ -346,7 +423,7 @@ func _update_car(c: Car, dt: float) -> void:
 		obs_v = abs(l.v)
 	var reach: float = c.hw + 1.0
 	for r in riders:
-		if r.state == WAIT:
+		if r.state == WAIT or r.path != 0:
 			continue
 		var fallen: bool = r.state == DOWN
 		var rv: float = r.v
@@ -388,6 +465,8 @@ func _update_car(c: Car, dt: float) -> void:
 
 # Getting back on the bike: never inside a car, whichever lane has room
 func _safe_spawn(r: Rider) -> void:
+	if r.path != 0:
+		return
 	for lane in [r.d, 1.8, 5.4]:
 		var clear := true
 		for c in cars:
@@ -480,7 +559,7 @@ func nearest_foe() -> Rider:
 	var best: Rider = null
 	var bs := 1e9
 	for f in foes:
-		if f.state != RIDE and f.state != WAIT:
+		if (f.state != RIDE and f.state != WAIT) or f.path != me.path:
 			continue
 		var dz: float = f.s - me.s
 		if abs(dz) > Z_REACH:
@@ -519,7 +598,7 @@ func try_attack(kind: String) -> void:
 func _resolve_hit(a: Dictionary) -> void:
 	var list: Array[Rider] = []
 	for f in foes:
-		if f.state != RIDE and f.state != WAIT:
+		if (f.state != RIDE and f.state != WAIT) or f.path != me.path:
 			continue
 		var dz: float = f.s - me.s
 		var dx: float = f.d - me.d
@@ -562,14 +641,15 @@ func _hit_foe(f: Rider, a: Dictionary) -> void:
 func ko_foe(f: Rider, side: int, by_me: bool, why: String) -> void:
 	var kmh := dial(f, f.v)
 	var knock := why == ""
-	var inj: float = kmh * D.rules.fall_k * (1.0 - f.prot) * (0.6 if knock else 1.0)
-	var health: float = 50.0 if knock else clamp(f.hp / f.max_hp * 100.0, 15.0, 100.0)
+	var inj: float = D.fall_injury(kmh, f.prot, knock)
 	if why != "":
 		f.dur -= 30.0 if why == "car" else 25.0
-	f.out = not f.is_cop and (inj >= health * 1.5 or f.dur <= 0.0)
+	f.life -= inj
+	f.out = not f.is_cop and (f.life <= 0.0 or f.dur <= 0.0)
 	f.state = DOWN
 	f.down_t = 0.0
-	f.down_dur = 1e9 if (f.is_cop or f.out) else 2.5 + inj / 18.0
+	f.down_dur = 1e9 if (f.is_cop or f.out) else 0.0
+	_down_start(f)
 	f.attack = null
 	f.bike_rot = 0.0
 	f.push = side * 1.3 * X2M * 0.5
@@ -604,6 +684,70 @@ func ko_foe(f: Rider, side: int, by_me: bool, why: String) -> void:
 			f.weapon = "none"
 		show_banner(weapon_def(w).win)
 		ev("weapon")
+
+func _down_start(r: Rider) -> void:
+	r.run_phase = 0
+	r.run_t = 0.0
+	r.lie_t = 0.0
+	r.bike_side = 1.0 if r.lean >= 0.0 else -1.0
+
+# After a fall: the body flies and lands, lies a moment, gets up, runs to the bike, lifts it and gets on.
+# The bike (s, d) slides to a stop on its own. Returns true when he is back in the saddle.
+func _update_down(r: Rider, dt: float, can_rise: bool) -> bool:
+	r.down_t += dt
+	r.gear = 0
+	r.v = max(0.0, r.v - 14.0 * dt)
+	r.s += r.v * dt
+	r.d = clamp(r.d + r.push * dt, -12.4, 12.4)
+	r.push *= exp(-3.0 * dt)
+	if r.run_phase < 3:
+		r.bike_rot = min(1.0, r.bike_rot + dt * 5.0)
+	match r.run_phase:
+		0:
+			_update_flight(r, dt)
+			if r.fly_y <= 0.19 and r.fly_v < 0.8:
+				r.lie_t += dt
+				if r.lie_t > 0.55 and can_rise:
+					r.run_phase = 1
+					r.run_t = 0.0
+					r.fly_v = 0.0
+					r.fly_vd = 0.0
+					r.fly_y = 0.0
+					r.fly_s -= 0.9    # he lay head first; he gets up where his feet were
+		1:
+			r.run_t += dt
+			if r.run_t > 0.5:
+				r.run_phase = 2
+				r.run_t = 0.0
+				r.run_side = 1.0 if r.fly_d >= r.d else -1.0
+		2:
+			# runs to the side of the bike he came from, stands by the handlebar
+			r.run_t += dt
+			var tx: float = r.s + 0.35
+			var ty: float = r.d + r.run_side * 0.72
+			var to := Vector2(tx - r.fly_s, ty - r.fly_d)
+			var step: float = float(D.rules.run_v) * (0.9 if not r.is_me else 1.0) * dt * min(1.0, r.run_t * 3.0 + 0.3)
+			if to.length() <= step or to.length() < 0.12:
+				r.fly_s = tx
+				r.fly_d = ty
+				r.run_phase = 3
+				r.run_t = 0.0
+			else:
+				var u := to.normalized()
+				r.fly_s += u.x * step
+				r.fly_d += u.y * step
+		3:
+			# lifts the bike; if it lies off the road he walks it back onto the edge
+			r.run_t += dt
+			r.bike_rot = max(0.0, 1.0 - r.run_t / 0.7)
+			r.lean = move_toward(r.lean, 0.0, 2.0 * dt)
+			var lim: float = rd(r).edge - 0.4
+			r.d = move_toward(r.d, clamp(r.d, -lim, lim), 3.0 * dt)
+			r.fly_s = r.s + 0.35
+			r.fly_d = r.d + r.run_side * 0.72
+			if r.run_t >= 0.75:
+				return true
+	return false
 
 func _launch(r: Rider, side: int) -> void:
 	r.fly_s = r.s
@@ -666,13 +810,12 @@ func crash(why: String, kmh_at := -1.0) -> void:
 	me.attack = null
 	me.falls += 1
 	me.bike_rot = 0.0
-	var loss := {"head": 45.0, "car": 30.0, "pole": 25.0, "rear": 20.0, "off": 18.0}.get(why, 12.0) as float
+	_down_start(me)
+	var loss := {"head": 45.0, "car": 30.0, "pole": 25.0, "wall": 25.0, "rear": 20.0, "off": 18.0}.get(why, 12.0) as float
 	me.bike_hp = max(0.0, me.bike_hp - loss)
-	var inj: float = kmh * D.rules.fall_k * (1.0 - me.prot)
 	if why == "knock":
 		me.hp = max(me.hp, 50.0)
-		inj *= 0.6
-	me.hp = max(0.0, me.hp - inj)
+	me.hp = max(0.0, me.hp - D.fall_injury(kmh, me.prot, why == "knock"))
 	me.fall_kmh = round(kmh)
 	me.dead = me.hp <= 0.0
 	_launch(me, 1 if me.lean >= 0.0 else -1)
@@ -687,11 +830,44 @@ func crash(why: String, kmh_at := -1.0) -> void:
 		show_banner("Лоб в лоб", true)
 	elif why == "rear":
 		show_banner("Въехали сзади", true)
+	elif why == "pillar":
+		show_banner("В опору моста", true)
+	elif why == "wall":
+		show_banner("В стену тоннеля", true)
+	elif why == "rock":
+		show_banner("На камень", true)
+	elif why == "hole":
+		show_banner("Яма", true)
 	elif why != "knock":
 		show_banner("Авария", true)
 	else:
 		show_banner("Тебя вырубили", true)
 	ev("crash", why)
+
+# what he hit: a tunnel wall, a bridge pillar, a rock on the shortcut, a pole by the road
+func _solid_why(r: Rider) -> String:
+	if r.path != 0:
+		return "rock" if abs(r.d) < rd(r).edge else "pole"
+	if road.feature_at(r.s, "tunnel") != null:
+		return "wall"
+	for f in road.features:
+		if f.kind == "bridge" and abs(float(f.s) - r.s) < 2.0:
+			return "pillar"
+	return "pole"
+
+# potholes on the shortcut: a jolt, and a fall if you hit one flat out
+func _potholes(m: Rider, prev_s: float) -> void:
+	for b in rd(m).bumps:
+		if float(b[0]) > prev_s and float(b[0]) <= m.s and abs(float(b[1]) - m.d) < 0.75:
+			var pct: float = m.v / m.top
+			if pct > 0.82 and rng.randf() < 0.35:
+				crash("hole")
+				return
+			m.v *= 0.95
+			m.push += (1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(1.5, 3.0)
+			show_banner("Яма!", true)
+			ev("bump")
+			return
 
 func _start_chase(c: Rider, who: Rider = null) -> void:
 	c.state = RIDE
@@ -712,7 +888,7 @@ func _nearest_racer(f: Rider) -> Rider:
 			continue
 		if r.is_me and phase != "race":
 			continue
-		var dist: float = abs(r.s - f.s) + abs(r.d - f.d) * 0.5
+		var dist: float = abs(r.ps - f.ps) + (abs(r.d - f.d) * 0.5 if r.path == f.path else 30.0)
 		if dist < bd:
 			bd = dist
 			best = r
@@ -729,8 +905,8 @@ func _pick_target(f: Rider) -> void:
 	var cur := f.target
 	var keep: bool = cur != null and cur.state == RIDE and not cur.finished and (not cur.is_me or phase == "race")
 	if keep:
-		var cur_d: float = abs(cur.s - f.s) + abs(cur.d - f.d) * 0.5
-		var near_d: float = abs(near.s - f.s) + abs(near.d - f.d) * 0.5
+		var cur_d: float = abs(cur.ps - f.ps) + abs(cur.d - f.d) * 0.5
+		var near_d: float = abs(near.ps - f.ps) + abs(near.d - f.d) * 0.5
 		if cur_d < near_d + 5.0:
 			return
 	f.target = near
@@ -738,7 +914,7 @@ func _pick_target(f: Rider) -> void:
 func _cop_hit(f: Rider, tg: Rider, w: Dictionary, side: int) -> void:
 	if tg.inv > 0.0 or tg.state != RIDE:
 		return
-	var near_me: bool = abs(tg.s - me.s) < 120.0
+	var near_me: bool = abs(tg.ps - me.ps) < 120.0
 	tg.hp -= w.foe * tr.foeDmg * 1.2 * (1.0 - 0.5 * tg.prot)
 	tg.stun = 0.45
 	tg.flash = 0.12
@@ -764,7 +940,7 @@ func _say(f: Rider, chance: float) -> void:
 func live_place() -> int:
 	var p := 1
 	for f in foes:
-		if not f.is_cop and not f.out and f.s > me.s:
+		if not f.is_cop and not f.out and (f.finished or f.ps > me.ps):
 			p += 1
 	return p
 
@@ -777,13 +953,20 @@ func racers_left() -> int:
 	return n
 
 # ---------- bends: how fast a rider can be here and still make everything he can see ----------
-func corner_limit(s: float, v: float, a_grip: float, a_brake: float, margin := 0.92) -> float:
+func corner_limit(s: float, v: float, a_grip: float, a_brake: float, margin := 0.92, on: Road = null, branch_i := -1) -> float:
+	var rr: Road = road if on == null else on
 	var lim := 1e9
 	var look: float = max(50.0, v * v / (2.0 * a_brake) + v * 0.8)
 	var ds := 8.0
 	var x := 0.0
+	var b: Road = null if branch_i < 0 else road.branches[branch_i]
 	while x < look:
-		var k: float = abs(road.kappa_at(s + x))
+		# a rider heading for a side road reads the side road's bends once he gets to it
+		var k: float
+		if b != null and s + x >= b.s0:
+			k = abs(b.kappa_at(s + x - b.s0))
+		else:
+			k = abs(rr.kappa_at(s + x))
 		if k > 0.0005:
 			var vk := sqrt(a_grip * margin / k)
 			var allowed := sqrt(vk * vk + 2.0 * a_brake * 0.9 * max(0.0, x - v * 0.25))
@@ -800,7 +983,14 @@ func steer_auth(m: Rider) -> float:
 	return min(auth, m.v * 0.75)
 
 func bend_pull(m: Rider, s: float) -> float:
-	return road.kappa_at(s) * m.v * m.v * 1.487 * m.st.grip_f * STEER_F
+	return rd(m).kappa_at(s) * m.v * m.v * 1.487 * m.st.grip_f * STEER_F * (1.15 if gravel(m) else 1.0)
+
+# corner limit for a rider on whatever road he is on, and the side road he means to take
+func _limit_for(r: Rider, margin: float) -> float:
+	var bi := branch_ahead(r, 400.0)
+	var takes: bool = bi >= 0 and ((r.is_me and bot_branch == "take") or _wants_branch(r, bi))
+	var a_grip: float = r.a_grip * (0.85 if gravel(r) else 1.0)
+	return corner_limit(r.s, r.v, a_grip, r.a_brake, margin, rd(r), bi if takes else -1)
 
 func gear_span(k: int) -> float:
 	return pow(float(k + 1) / me.gears, 0.72) * (1.06 if k == me.gears - 1 else 1.0)
@@ -841,10 +1031,19 @@ func _path_clear(lane: float) -> bool:
 	return true
 
 func _bot_input() -> void:
-	var lim := corner_limit(me.s, me.v, me.a_grip, me.a_brake, 0.9)
+	var lim := _limit_for(me, 0.9)
 	var tx := me.bot_lane
 	me.bot_block = 0.0
-	if not _lane_clear(tx, 0.0):
+	var bi := branch_ahead(me, 220.0)
+	if me.path != 0:
+		tx = 0.0
+	elif bi >= 0 and bot_branch == "take":
+		tx = road.branches[bi].side * 5.4
+	elif bi >= 0 and road.branches[bi].side > 0 and road.branches[bi].s0 - me.s < 90.0:
+		tx = 1.8
+	if me.path != 0:
+		pass
+	elif not _lane_clear(tx, 0.0):
 		var free: Array = []
 		for v2 in [1.8, 5.4, -1.8, -5.4]:
 			if _lane_clear(v2, 8.0) and _path_clear(v2):
@@ -859,9 +1058,13 @@ func _bot_input() -> void:
 				if c.dir > 0 and e > 0.0 and e < closing * closing / 18.0 + 18.0 and abs(c.d - me.d) < 2.2:
 					me.bot_block = max(0.05, c.v * 0.95)
 					break
-	elif tx < 0.0 and _lane_clear(1.8, 15.0):
+	elif tx < 0.0 and _lane_clear(1.8, 15.0) and not (bi >= 0 and bot_branch == "take"):
 		tx = 1.8
-	me.bot_lane = tx
+	var ob: Variant = rd(me).solid_ahead(me.s, tx, max(30.0, me.v * 1.8))
+	if ob != null:
+		tx = float(ob[1]) + (float(ob[2]) + 1.5) * (1.0 if me.d >= float(ob[1]) else -1.0)
+	if me.path == 0:
+		me.bot_lane = tx
 	inp.steer = clamp((tx - me.d) * 0.55 + bend_pull(me, me.s) / max(1.0, steer_auth(me)), -1.0, 1.0)
 	if bot_human:
 		_hum_t -= 1.0 / 60.0
@@ -891,7 +1094,8 @@ func _update_me(dt: float) -> void:
 	var m := me
 	var top := m.top
 	var pct: float = m.v / top
-	var k_road := road.kappa_at(m.s)
+	var k_road := rd(m).kappa_at(m.s)
+	var prev_s := m.s
 	m.inv = max(0.0, m.inv - dt)
 	m.flash = max(0.0, m.flash - dt)
 	var stopping := phase == "finish" or phase == "over"
@@ -907,7 +1111,7 @@ func _update_me(dt: float) -> void:
 		if stopping:
 			steer = clamp((clamp(m.d, 1.8, 5.4) - m.d) * 0.55 + pull / max(1.0, auth), -1.0, 1.0)
 		m.sv += (steer - m.sv) * min(1.0, dt * 7.0)
-		var off: bool = abs(m.d) > Road.EDGE
+		var off: bool = abs(m.d) > rd(m).edge
 		var over: bool = abs(pull) > auth * 1.15
 		m.slide = abs(pull) > auth * 0.82 and m.v > top * 0.3
 		var bars: float = m.sv * auth * (0.68 if over else (0.88 if m.slide else 1.0))
@@ -919,7 +1123,7 @@ func _update_me(dt: float) -> void:
 		var want_psi: float = atan2(lateral + m.push, max(4.0, m.v))
 		m.psi += (want_psi - m.psi) * min(1.0, dt * 9.0)
 		var v2: float = m.v * m.v
-		var a_req: float = v2 * road.kappa_at(m.s)
+		var a_req: float = v2 * rd(m).kappa_at(m.s)
 		var q: float = bars / pull if abs(pull) > 0.5 else 0.0
 		var a_eff: float = a_req * clamp(q, -0.2, 1.25)
 		var want_lean: float = atan2(a_eff, G) * 0.8 + m.sv * 0.24 * (1.0 - min(1.0, abs(q)))
@@ -937,13 +1141,19 @@ func _update_me(dt: float) -> void:
 				m.v += top * m.acc * dt * max(0.04, 1.0 - 0.96 * pct)
 		else:
 			m.v -= top * (0.02 + 0.05 * pct) * dt
-		m.v -= G * road.grade_at(m.s) * 0.55 * dt
+		m.v -= G * rd(m).grade_at(m.s) * 0.55 * dt
 		if off and m.v > top * 0.4:
 			m.v -= top * 0.75 * m.st.off * dt
 			ev("dust")
+		# gravel holds you back: no more than 80 % of top speed on the shortcut
+		if gravel(m) and m.v > top * 0.8:
+			m.v -= top * 0.6 * dt
 		m.v = clamp(m.v, 0.0, top)
 		if phase == "race" and m.inv <= 0.0:
-			_car_contact(dt)
+			if m.path == 0:
+				_car_contact(dt)
+			if m.state == RIDE and m.path != 0:
+				_potholes(m, prev_s)
 			if m.state == RIDE:
 				if off and pct > 0.62 and dial(m, m.v) > 110.0:
 					m.off_t += dt
@@ -952,9 +1162,11 @@ func _update_me(dt: float) -> void:
 				if m.off_t > 0.3:
 					m.off_t = 0.0
 					crash("off")
-			if m.state == RIDE and abs(m.d) > Road.EDGE and road.solid_hit(m.s, m.d):
-				crash("pole")
-		m.d = clamp(m.d, -12.4, 12.4)
+			if m.state == RIDE and rd(m).solid_hit(m.s, m.d):
+				crash(_solid_why(m))
+		m.d = clamp(m.d, -(rd(m).edge + 4.4), rd(m).edge + 4.4)
+		if m.state == RIDE:
+			_update_path(m, prev_s)
 		if m.state == RIDE:
 			if m.attack != null:
 				var a: Dictionary = m.attack
@@ -972,15 +1184,8 @@ func _update_me(dt: float) -> void:
 			if m.hp < 100.0 and t - m.last_hit > 4.0 and phase == "race":
 				m.hp = min(100.0, m.hp + 1.5 * dt)
 	else:
-		m.down_t += dt
-		m.gear = 0
-		m.v = max(0.0, m.v - 14.0 * dt)
-		m.s += m.v * dt
-		m.d += m.push * dt
-		m.push *= exp(-3.0 * dt)
-		m.bike_rot = min(1.0, m.bike_rot + dt * 5.0)
-		m.lean = m.lean
-		_update_flight(m, dt)
+		var rise_ok: bool = phase == "race" and not m.dead and not m.bustable and m.bike_hp > 0.0
+		var up := _update_down(m, dt, rise_ok)
 		if phase == "race":
 			if m.dead:
 				if m.down_t > 1.6:
@@ -989,15 +1194,13 @@ func _update_me(dt: float) -> void:
 				end_race("busted")
 			if phase == "race" and not m.dead and m.down_t > 1.4 and m.bike_hp <= 0.0:
 				end_race("wrecked")
-			if phase == "race" and not m.dead and m.down_t > 2.2:
+			if phase == "race" and up:
 				m.state = RIDE
-				m.d = clamp(m.fly_d, 1.8, 5.4) if abs(m.fly_d) > 0.0 else 1.8
-				m.s = max(m.s, m.fly_s - 2.0)
 				_safe_spawn(m)
 				m.off_t = 0.0
 				m.v = 0.0
 				m.hp = max(m.hp, 15.0)
-				m.inv = 1.8
+				m.inv = 1.5
 				m.sv = 0.0
 				m.push = 0.0
 				m.lean = 0.0
@@ -1006,7 +1209,8 @@ func _update_me(dt: float) -> void:
 				m.bike_rot = 0.0
 				ev("up")
 	_update_gear(dt, m.state == RIDE and not stopping and m.gas_on)
-	if phase == "race" and m.s >= road.finish_s:
+	_calc_ps(m)
+	if phase == "race" and m.path == 0 and m.s >= road.finish_s:
 		final_place = live_place()
 		stats.t_finish = t
 		end_kind = "finish"
@@ -1031,34 +1235,28 @@ func _update_foe(f: Rider, dt: float) -> void:
 	f.flash = max(0.0, f.flash - dt)
 	f.inv = max(0.0, f.inv - dt)
 	f.stun = max(0.0, f.stun - dt)
+	_calc_ps(f)
 	if f.state == WAIT:
 		if phase == "race":
 			var near := _nearest_racer(f)
-			if near != null and near.s > f.s - 40.0 and near.s < f.s + 60.0:
+			if near != null and near.path == 0 and near.s > f.s - 40.0 and near.s < f.s + 60.0:
 				_start_chase(f, near)
 		return
-	if f.s >= road.length - 20.0:
+	if f.path == 0 and f.s >= road.length - 20.0:
 		f.v = 0.0
 		return
 	if f.state == DOWN:
-		f.down_t += dt
-		f.v = max(0.0, f.v - 14.0 * dt)
-		f.s += f.v * dt
-		f.d = clamp(f.d + f.push * dt, -12.4, 12.4)
-		f.push *= exp(-3.0 * dt)
-		f.bike_rot = min(1.0, f.bike_rot + dt * 5.0)
-		_update_flight(f, dt)
-		if f.down_t > f.down_dur:
+		if _update_down(f, dt, not f.out and not f.is_cop):
 			f.state = RIDE
 			f.hp = f.max_hp * 0.6
 			f.v = 0.0
-			f.d = clamp(f.fly_d, 1.5, 5.8)
-			f.s = max(f.s, f.fly_s - 2.0)
-			_safe_spawn(f)
+			if f.path == 0:
+				_safe_spawn(f)
 			f.inv = 1.5
 			f.push = 0.0
 			f.vx = 0.0
 			f.bike_rot = 0.0
+			f.lane = clamp(f.d, -rd(f).half + 1.8, rd(f).half - 1.8) if f.path == 0 else clamp(f.d, -1.0, 1.0)
 		return
 	var tg: Rider = m
 	if f.is_cop:
@@ -1071,13 +1269,15 @@ func _update_foe(f: Rider, dt: float) -> void:
 			f.s += f.v * dt
 			return
 		tg = f.target
-	var dz: float = f.s - tg.s
+	var same: bool = tg.path == f.path
+	var dz: float = (f.s - tg.s) if same else (f.ps - tg.ps)
 	var adz: float = abs(dz)
 	var tgt: float
+	var prev_s := f.s
 	f.look_t -= dt
 	if f.look_t <= 0.0:
 		f.look_t = 0.2
-		f.lim = corner_limit(f.s, f.v, f.a_grip, f.a_brake, 0.9)
+		f.lim = _limit_for(f, 0.9)
 	if f.is_cop:
 		# closes up until he is right alongside, then holds there and swings. There is no timer: only a knockout stops him
 		tgt = max(0.0, tg.v + clamp(-dz * 0.8, -8.0, max(8.0, v_top * 0.35)))
@@ -1100,34 +1300,48 @@ func _update_foe(f: Rider, dt: float) -> void:
 			tgt = v_top * 0.6
 	if f.stun > 0.0:
 		tgt *= 0.82
-	if abs(f.d) > Road.EDGE:
+	if abs(f.d) > rd(f).edge:
 		tgt *= 0.6
 	var pull: float
 	if f.is_cop:
 		pull = 0.3 * v_top
 	else:
 		pull = f.acc * f.top * max(0.18 if dz < -10.0 else 0.06, 1.0 - 0.96 * f.v / f.top)
+	if gravel(f):
+		tgt = min(tgt, f.top * 0.8)
 	f.v += clamp(tgt - f.v, -f.a_brake * dt, pull * dt)
 	f.v = max(0.0, f.v)
 	# steering
 	f.lane_t -= dt
 	if f.lane_t <= 0.0:
-		f.lane = LANES[1] if (f.style == "maniac" and rng.randf() < 0.25) else MY_LANES[rng.randi() % 2]
+		if f.path != 0:
+			f.lane = rd(f).half * (0.4 if rng.randf() < 0.5 else -0.4)
+		else:
+			f.lane = LANES[1] if (f.style == "maniac" and rng.randf() < 0.25) else MY_LANES[rng.randi() % 2]
 		f.lane_t = rng.randf_range(2.5, 6.0)
 	var tx: float = f.lane
+	# a side road coming up: get into its lane, or keep out of it
+	var bi := branch_ahead(f, 170.0)
+	if bi >= 0:
+		var bb: Road = road.branches[bi]
+		if _wants_branch(f, bi):
+			tx = bb.side * 5.4
+		elif bb.side > 0 and bb.s0 - f.s < 90.0 and tx > 3.6:
+			tx = 1.8
 	f.angry = max(0.0, f.angry - dt)
 	var sty := "cop" if f.is_cop else f.style
-	var live := phase == "race" and tg.state == RIDE and tg.inv <= 0.0
+	var live := phase == "race" and tg.state == RIDE and tg.inv <= 0.0 and same
+	var lane_lim: float = 6.6 if f.path == 0 else rd(f).half - 0.5
 	var range_m: float = {"cop": 70.0, "brawler": 32.0, "thief": 32.0 if m.weapon != "none" else 12.0, "maniac": 15.0, "blocker": 13.0, "racer": 4.5, "calm": 4.5, "coward": 0.0}[sty]
 	if f.angry > 0.0 and sty != "coward":
 		range_m = max(range_m, 25.0)
 	if live and adz < range_m:
 		var hash_v := (f.name.length() * 7) % 3
-		tx = clamp(tg.d + (-1.0 if f.d < tg.d else 1.0) * (1.25 + hash_v * 0.3), -6.6, 6.6)
-	if live and sty == "blocker" and dz > 2.5 and dz < 28.0:
-		tx = clamp(m.d, -6.6, 6.6)
-	if live and sty == "coward" and f.angry > 0.0 and adz < 30.0:
-		tx = 6.6 if f.d >= m.d else -6.6
+		tx = clamp(tg.d + (-1.0 if f.d < tg.d else 1.0) * (1.25 + hash_v * 0.3), -lane_lim, lane_lim)
+	if live and sty == "blocker" and dz > 2.5 and dz < 28.0 and m.path == f.path:
+		tx = clamp(m.d, -lane_lim, lane_lim)
+	if live and sty == "coward" and f.angry > 0.0 and adz < 30.0 and m.path == f.path:
+		tx = lane_lim if f.d >= m.d else -lane_lim
 	if live and not f.said and adz < 13.0:
 		f.said = true
 		_say(f, 1.0 if f.is_cop else 0.5)
@@ -1136,7 +1350,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 		if f.talk_t <= 0.0:
 			f.talk_t = rng.randf_range(7.0, 13.0)
 			_say(f, 1.0)
-	for c in cars:
+	for c in (cars if f.path == 0 else []):
 		var dd: float = c.s - f.s
 		if dd > 0.0 and dd < (16.0 + (f.v - c.v) * 0.9) * (0.5 if sty == "maniac" else 1.0) and abs(c.d - f.d) < 2.3:
 			var nx: float = c.d + (-3.6 if f.d <= c.d else 3.6)
@@ -1144,16 +1358,20 @@ func _update_foe(f: Rider, dt: float) -> void:
 				nx = c.d + (3.6 if f.d <= c.d else -3.6)
 			tx = nx
 			break
-	if f.is_cop and abs(f.d) > 7.2:
+	if f.is_cop and f.path == 0 and abs(f.d) > 7.2:
 		tx = sign(f.d) * 5.6
+	var ob: Variant = rd(f).solid_ahead(f.s, tx, max(25.0, f.v * 1.6))
+	if ob != null:
+		tx = float(ob[1]) + (float(ob[2]) + 1.4) * (1.0 if f.d >= float(ob[1]) else -1.0)
 	var lat_max: float = max(1.5, f.v * 0.45)
 	var want: float = clamp(clamp(tx - f.d, -7.2, 7.2) * 1.5 * (0.72 + 0.006 * f.hand), -lat_max, lat_max)
 	f.vx += (want - f.vx) * min(1.0, dt * 5.0)
 	f.lat = f.vx + f.push
-	f.d = clamp(f.d + f.lat * dt, -12.4, 12.4)
+	f.d = clamp(f.d + f.lat * dt, -(rd(f).edge + 4.4), rd(f).edge + 4.4)
 	f.push *= exp(-3.0 * dt)
 	f.s += f.v * dt
-	var k: float = road.kappa_at(f.s)
+	_update_path(f, prev_s)
+	var k: float = rd(f).kappa_at(f.s)
 	var a_lat: float = clamp(f.v * f.v * k, -f.a_grip, f.a_grip) + f.vx * 3.5
 	f.lean += (clamp(atan2(a_lat, G) * 0.8, -0.75, 0.75) * clamp(f.v / 8.0, 0.0, 1.0) - f.lean) * min(1.0, dt * 8.0)
 	f.psi = atan2(f.vx, max(4.0, f.v))
@@ -1161,7 +1379,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 	# crashes
 	var can_crash: bool = not f.is_cop or t - f.hit_t < 2.5
 	if f.inv <= 0.0:
-		for c in cars:
+		for c in (cars if f.path == 0 else []):
 			var dd2: float = c.s - f.s
 			if abs(dd2) < c.len * 0.5 + 1.0 and abs(c.d - f.d) < c.hw + 0.35:
 				if c.dir > 0 and f.v <= c.v:
@@ -1178,12 +1396,12 @@ func _update_foe(f: Rider, dt: float) -> void:
 					return
 				f.v = max(0.0, c.v)
 				break
-		if can_crash and abs(f.d) > Road.EDGE and road.solid_hit(f.s, f.d):
+		if can_crash and rd(f).solid_hit(f.s, f.d):
 			ko_foe(f, 0, false, "pole")
 			f.v *= 0.3
 			return
 	# shove with the player
-	if tg.is_me and m.state == RIDE and adz < 2.2 and abs(f.d - m.d) < 1.0:
+	if tg.is_me and same and m.state == RIDE and adz < 2.2 and abs(f.d - m.d) < 1.0:
 		var sd := 1 if f.d >= m.d else -1
 		f.d += sd * 4.0 * dt
 		m.d -= sd * 2.5 * dt
@@ -1195,7 +1413,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 		if not a.done and a.t >= 0.28:
 			a.done = true
 			var w := weapon_def(f.weapon)
-			if abs(f.s - tg.s) < Z_REACH and abs(f.d - tg.d) < w.reach * REACH_M * f.reach_k + 0.3:
+			if tg.path == f.path and abs(f.s - tg.s) < Z_REACH and abs(f.d - tg.d) < w.reach * REACH_M * f.reach_k + 0.3:
 				if not tg.is_me:
 					_cop_hit(f, tg, w, 1 if tg.d >= f.d else -1)
 				else:
@@ -1214,7 +1432,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 						show_banner("Отобрали " + str(weapon_def(got).acc), true)
 		if a.t > 0.48:
 			f.attack = null
-	elif f.cd <= 0.0 and phase == "race" and tg.state == RIDE and tg.inv <= 0.0 and adz < 2.6 and f.stun <= 0.0 and (t >= next_atk or not tg.is_me):
+	elif f.cd <= 0.0 and phase == "race" and same and tg.state == RIDE and tg.inv <= 0.0 and adz < 2.6 and f.stun <= 0.0 and (t >= next_atk or not tg.is_me):
 		var calm_type: bool = sty == "racer" or sty == "calm" or sty == "coward"
 		if not (calm_type and f.angry <= 0.0) and not (sty == "coward" and rng.randf() < 0.7):
 			var w2 := weapon_def(f.weapon)
@@ -1223,7 +1441,7 @@ func _update_foe(f: Rider, dt: float) -> void:
 					next_atk = t + 0.8
 				f.attack = {"t": 0.0, "side": 1 if tg.d >= f.d else -1, "done": false, "weapon": f.weapon, "type": "hand"}
 				f.cd = rng.randf_range(1.3, 2.6) * (1.6 - f.aggr * 0.6)
-	if not f.is_cop and not f.finished and f.s >= road.finish_s:
+	if not f.is_cop and not f.finished and f.path == 0 and f.s >= road.finish_s:
 		f.finished = true
 		order.append(f)
 

@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""Газ и цепь: accounts, saves, records and the fighters table.
+
+Plain Python 3 standard library and SQLite, nothing to install. Listens on 127.0.0.1 only; Caddy forwards /gaz-api/* here.
+    GAZ_DB=/path/gaz.db GAZ_PORT=8787 python3 gaz_api.py
+Restarts itself (exits, systemd starts it again) when this file is replaced by a newer version.
+"""
+import hashlib, hmac, json, os, re, secrets, sqlite3, sys, threading, time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
+
+VERSION = 1
+DB = os.environ.get("GAZ_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "gaz.db"))
+PORT = int(os.environ.get("GAZ_PORT", "8787"))
+PREFIX = "/gaz-api"
+MAX_BODY = 256 * 1024
+LOGIN_RE = re.compile(r"^[\w .\-]{2,20}$", re.UNICODE)
+TRACK_RE = re.compile(r"^[a-z0-9_]{1,24}$")
+
+SCHEMA = """
+create table if not exists users(
+  id integer primary key, login text not null, login_key text not null unique, pw text not null,
+  created integer not null, save text, save_rev integer not null default 0,
+  ko integer not null default 0, ko_riders integer not null default 0, ko_cops integer not null default 0);
+create table if not exists tokens(hash text primary key, user_id integer not null, created integer not null, last integer not null);
+create table if not exists records(user_id integer not null, track text not null, time_ms integer not null, bike text not null,
+  at integer not null, primary key(user_id, track));
+create table if not exists results(id integer primary key, user_id integer not null, track text not null, time_ms integer,
+  bike text, ko integer, ko_cops integer, finished integer, place integer, at integer not null);
+create index if not exists records_track on records(track, time_ms);
+"""
+
+
+def db():
+    c = sqlite3.connect(DB, timeout=10)
+    c.row_factory = sqlite3.Row
+    c.execute("pragma journal_mode=wal")
+    c.execute("pragma foreign_keys=on")
+    return c
+
+
+def hash_pw(pw, salt=None):
+    salt = salt or secrets.token_bytes(16)
+    h = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
+    return "scrypt$" + salt.hex() + "$" + h.hex()
+
+
+def check_pw(pw, stored):
+    try:
+        _, salt, h = stored.split("$")
+        return hmac.compare_digest(hash_pw(pw, bytes.fromhex(salt)), stored)
+    except Exception:
+        return False
+
+
+def tok_hash(t):
+    return hashlib.sha256(t.encode("utf-8")).hexdigest()
+
+
+# a few attempts per minute from one address, so nobody can guess passwords quickly
+_hits = {}
+_hits_lock = threading.Lock()
+
+
+def limited(key, n, window):
+    now = time.time()
+    with _hits_lock:
+        q = [t for t in _hits.get(key, []) if now - t < window]
+        if len(q) >= n:
+            _hits[key] = q
+            return True
+        q.append(now)
+        _hits[key] = q
+        if len(_hits) > 20000:
+            _hits.clear()
+        return False
+
+
+class Fail(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code, self.msg = code, msg
+
+
+class H(BaseHTTPRequestHandler):
+    server_version = "gaz-api"
+    sys_version = ""
+    timeout = 15
+
+    def log_message(self, fmt, *a):
+        pass
+
+    def ip(self):
+        f = self.headers.get("X-Forwarded-For", "")
+        return f.split(",")[0].strip() or self.client_address[0]
+
+    def body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > MAX_BODY:
+            raise Fail(413, "Слишком много данных")
+        raw = self.rfile.read(n) if n else b"{}"
+        try:
+            v = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            raise Fail(400, "Не понял запрос")
+        if not isinstance(v, dict):
+            raise Fail(400, "Не понял запрос")
+        return v
+
+    def send(self, code, obj):
+        data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def user(self, c):
+        a = self.headers.get("Authorization", "")
+        if not a.startswith("Bearer "):
+            raise Fail(401, "Нужно войти")
+        row = c.execute("select u.* from tokens t join users u on u.id = t.user_id where t.hash = ?", (tok_hash(a[7:].strip()),)).fetchone()
+        if row is None:
+            raise Fail(401, "Вход устарел, войди снова")
+        return row
+
+    def route(self, method):
+        path = urlparse(self.path).path
+        if not path.startswith(PREFIX + "/"):
+            raise Fail(404, "Нет такого")
+        p = path[len(PREFIX):]
+        if limited(("all", self.ip()), 600, 60):
+            raise Fail(429, "Слишком часто, подожди минуту")
+        c = db()
+        try:
+            with c:
+                if method == "GET" and p == "/ping":
+                    return {"ok": True, "v": VERSION}
+                if method == "POST" and p in ("/register", "/login"):
+                    return self.auth(c, p == "/register")
+                if method == "POST" and p == "/logout":
+                    a = self.headers.get("Authorization", "")
+                    c.execute("delete from tokens where hash = ?", (tok_hash(a[7:].strip()),))
+                    return {"ok": True}
+                if method == "GET" and p == "/save":
+                    u = self.user(c)
+                    return {"save": json.loads(u["save"]) if u["save"] else None, "rev": u["save_rev"], "login": u["login"]}
+                if method == "PUT" and p == "/save":
+                    return self.put_save(c)
+                if method == "POST" and p == "/result":
+                    return self.result(c)
+                if method == "GET" and p == "/records":
+                    return self.records(c)
+                if method == "GET" and p == "/fighters":
+                    rows = c.execute("select login, ko, ko_riders, ko_cops from users where ko > 0 order by ko desc, ko_cops desc, id limit 100").fetchall()
+                    return {"rows": [dict(r) for r in rows]}
+        finally:
+            c.close()
+        raise Fail(404, "Нет такого")
+
+    def auth(self, c, new):
+        if limited(("auth", self.ip()), 20, 600):
+            raise Fail(429, "Слишком много попыток, подожди 10 минут")
+        b = self.body()
+        login = " ".join(str(b.get("login", "")).split())
+        pw = str(b.get("password", ""))
+        if not LOGIN_RE.match(login):
+            raise Fail(400, "Логин: от 2 до 20 букв или цифр")
+        if not pw or len(pw) > 200:
+            raise Fail(400, "Нужен пароль")
+        key = login.casefold()
+        now = int(time.time())
+        if new:
+            if c.execute("select 1 from users where login_key = ?", (key,)).fetchone():
+                raise Fail(409, "Такой логин уже занят")
+            save = b.get("save")
+            save_txt = json.dumps(save, ensure_ascii=False) if isinstance(save, dict) else None
+            if save_txt and len(save_txt) > MAX_BODY:
+                save_txt = None
+            cur = c.execute("insert into users(login, login_key, pw, created, save, save_rev) values(?,?,?,?,?,?)",
+                            (login, key, hash_pw(pw), now, save_txt, 1 if save_txt else 0))
+            uid = cur.lastrowid
+        else:
+            row = c.execute("select * from users where login_key = ?", (key,)).fetchone()
+            if row is None or not check_pw(pw, row["pw"]):
+                raise Fail(401, "Неверный логин или пароль")
+            uid = row["id"]
+        tok = secrets.token_urlsafe(32)
+        c.execute("insert into tokens(hash, user_id, created, last) values(?,?,?,?)", (tok_hash(tok), uid, now, now))
+        u = c.execute("select * from users where id = ?", (uid,)).fetchone()
+        return {"token": tok, "login": u["login"], "save": json.loads(u["save"]) if u["save"] else None, "rev": u["save_rev"]}
+
+    def put_save(self, c):
+        u = self.user(c)
+        b = self.body()
+        save = b.get("save")
+        if not isinstance(save, dict):
+            raise Fail(400, "Нет сохранения")
+        base = int(b.get("rev", -1))
+        if base != u["save_rev"] and not b.get("force"):
+            # another device saved in between: send back what the server has, the game decides
+            return {"conflict": True, "save": json.loads(u["save"]) if u["save"] else None, "rev": u["save_rev"]}
+        txt = json.dumps(save, ensure_ascii=False)
+        rev = u["save_rev"] + 1
+        c.execute("update users set save = ?, save_rev = ? where id = ?", (txt, rev, u["id"]))
+        return {"rev": rev}
+
+    def result(self, c):
+        u = self.user(c)
+        if limited(("res", u["id"]), 120, 3600):
+            raise Fail(429, "Слишком много заездов за час")
+        b = self.body()
+        track = str(b.get("track", ""))
+        if not TRACK_RE.match(track):
+            raise Fail(400, "Нет такой трассы")
+        bike = str(b.get("bike", ""))[:40]
+        ko = max(0, min(60, int(b.get("ko", 0))))
+        ko_cops = max(0, min(20, int(b.get("ko_cops", 0))))
+        finished = bool(b.get("finished"))
+        t = int(b.get("time_ms", 0))
+        place = int(b.get("place", 0))
+        now = int(time.time())
+        c.execute("insert into results(user_id, track, time_ms, bike, ko, ko_cops, finished, place, at) values(?,?,?,?,?,?,?,?,?)",
+                  (u["id"], track, t, bike, ko, ko_cops, int(finished), place, now))
+        c.execute("update users set ko = ko + ?, ko_riders = ko_riders + ?, ko_cops = ko_cops + ? where id = ?",
+                  (ko + ko_cops, ko, ko_cops, u["id"]))
+        best = False
+        if finished and 20000 <= t <= 3600000:
+            old = c.execute("select time_ms from records where user_id = ? and track = ?", (u["id"], track)).fetchone()
+            if old is None or t < old["time_ms"]:
+                c.execute("insert or replace into records(user_id, track, time_ms, bike, at) values(?,?,?,?,?)", (u["id"], track, t, bike, now))
+                best = True
+        mine = c.execute("select time_ms from records where user_id = ? and track = ?", (u["id"], track)).fetchone()
+        rank = None
+        if mine:
+            rank = 1 + c.execute("select count(*) from records where track = ? and time_ms < ?", (track, mine["time_ms"])).fetchone()[0]
+        return {"best": best, "rank": rank}
+
+    def records(self, c):
+        q = parse_qs(urlparse(self.path).query)
+        track = (q.get("track") or [""])[0]
+        sql = "select r.track, u.login, r.bike, r.time_ms, r.at from records r join users u on u.id = r.user_id"
+        if track:
+            if not TRACK_RE.match(track):
+                raise Fail(400, "Нет такой трассы")
+            rows = c.execute(sql + " where r.track = ? order by r.time_ms, r.at limit 100", (track,)).fetchall()
+            return {"rows": [dict(r) for r in rows]}
+        out = {}
+        for r in c.execute(sql + " order by r.track, r.time_ms, r.at").fetchall():
+            lst = out.setdefault(r["track"], [])
+            if len(lst) < 50:
+                lst.append({k: r[k] for k in ("login", "bike", "time_ms", "at")})
+        return {"tracks": out}
+
+    def handle_any(self, method):
+        try:
+            self.send(200, self.route(method))
+        except Fail as e:
+            self.send(e.code, {"error": e.msg})
+        except Exception as e:
+            print("error:", repr(e), file=sys.stderr)
+            self.send(500, {"error": "Ошибка на сервере"})
+
+    def do_GET(self):
+        self.handle_any("GET")
+
+    def do_POST(self):
+        self.handle_any("POST")
+
+    def do_PUT(self):
+        self.handle_any("PUT")
+
+
+def watch_self():
+    me = os.path.abspath(__file__)
+    seen = os.path.getmtime(me)
+    while True:
+        time.sleep(20)
+        try:
+            if os.path.getmtime(me) != seen:
+                print("new version, restarting", file=sys.stderr)
+                os._exit(3)
+        except OSError:
+            pass
+
+
+def main():
+    c = db()
+    c.executescript(SCHEMA)
+    c.close()
+    threading.Thread(target=watch_self, daemon=True).start()
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    srv.daemon_threads = True
+    print("gaz-api %d on 127.0.0.1:%d, db %s" % (VERSION, PORT, DB), file=sys.stderr)
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

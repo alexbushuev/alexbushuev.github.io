@@ -15,7 +15,7 @@ func _ready() -> void:
 func fresh() -> Dictionary:
 	var strek: Dictionary = D.bike_by_id["strek"]
 	return {
-		"v": 1, "money": 0, "open": 1, "best": {}, "sound": true, "volume": 0.8, "vol_engine": 1.0, "vol_voice": 1.0, "keys": default_keys(),
+		"v": 1, "money": 0, "open": 1, "best": {}, "sound": true, "volume": 0.8, "vol_engine": 1.0, "vol_voice": 1.0, "mirrors": true, "keys": default_keys(),
 		"bikes": {"strek": new_bike(strek)}, "ride": {"0": "strek"},
 		"gear": {"glove": 0, "boot": 0, "baton": 0, "chain": 0, "suit": 0, "suits": [0], "helmet": 0, "helmets": [0], "suitColor": 0, "helmColor": 5, "weaponPick": "best"},
 	}
@@ -40,7 +40,12 @@ func load_save() -> void:
 	var loaded: Variant = JSON.parse_string(f.get_as_text())
 	if not (loaded is Dictionary):
 		return
-	data.merge(loaded, true)
+	apply(loaded)
+
+# Takes a save from the file or from the server and makes it whole: defaults for anything missing, numbers back to ints
+func apply(loaded: Dictionary) -> void:
+	data = fresh()
+	data.merge(loaded.duplicate(true), true)
 	var base: Dictionary = fresh().gear
 	base.merge(data.gear, true)
 	data.gear = base
@@ -67,11 +72,15 @@ func load_save() -> void:
 	data.keys = keys
 	_rebuild_keys()
 
-func persist() -> void:
+func persist(sync := true) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(data))
 		f.close()
+	# logged in: the account on the server gets it a moment later
+	var net: Node = get_node_or_null("/root/N")
+	if sync and net != null:
+		net.mark_dirty()
 
 func reset_for_test() -> void:
 	data = fresh()
@@ -232,12 +241,18 @@ func fmt(n: float) -> String:
 		s = s.substr(0, s.length() - 3)
 	return "$" + s + out
 
-func safe_kmh(prot: float) -> float:
-	return 100.0 / (float(D.rules.fall_k) * (1.0 - prot))
+# how much of your health one fall at this speed takes
+func fall_pct(kmh: float, prot: float) -> int:
+	return int(round(D.fall_injury(kmh, prot)))
 
-func safe_txt(prot: float) -> String:
-	var v := safe_kmh(prot)
-	return "Переживёшь падение на любой скорости" if v >= 400.0 else "Переживёшь падение до %d км/ч" % int(round(v))
+func fastest_kmh() -> float:
+	var best := 60.0
+	for id in data.bikes:
+		best = max(best, float(D.stats_of(D.bike_by_id[id], upgrades(id)).kmh))
+	return best
+
+func safe_txt(prot: float, kmh := 300.0) -> String:
+	return "Падение на %d км/ч: −%d%% здоровья" % [int(kmh), fall_pct(kmh, prot)]
 
 func accel_txt(a: float, b: Dictionary) -> String:
 	var c: Dictionary = D.leagues[int(b.cat)]
@@ -374,7 +389,7 @@ func finish_race(sim: Sim, kind: String) -> Dictionary:
 		title = "В больнице"
 		bad = true
 		var suit: Dictionary = D.gear.suits[int(g.suit)]
-		text = "Упал на %d км/ч %s%s. Скорая увезла, гонка окончена." % [int(me.fall_kmh), suit["in"], "" if int(g.helmet) > 0 else " и без шлема"]
+		text = "Упал на %d км/ч %s%s, а здоровья уже не хватило. Скорая увезла, гонка окончена." % [int(me.fall_kmh), suit["in"], "" if int(g.helmet) > 0 else " и без шлема"]
 		if float(suit.prot) + float(D.gear.helmets[int(g.helmet)].prot) < 0.5:
 			note = "Защита покупается в гараже, раздел «Экипировка»."
 	else:

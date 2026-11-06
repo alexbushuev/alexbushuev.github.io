@@ -227,7 +227,7 @@ func render() -> void:
 	if gear_tab:
 		var pr: float = float(D.gear.suits[worn_suit()].prot) + float(D.gear.helmets[worn_helmet()].prot)
 		name_l.text = "Защита %d%%" % int(round(pr * 100.0))
-		sub_l.text = S.safe_txt(pr)
+		sub_l.text = S.safe_txt(pr, S.fastest_kmh())
 	else:
 		var st: Dictionary = D.stats_of(b, u)
 		var gears: int = int(D.leagues[int(b.cat)].gears)

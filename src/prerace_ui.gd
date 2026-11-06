@@ -97,10 +97,11 @@ func render() -> void:
 	name_l.text = "%s %dcc" % [bike.name, int(bike.cc)]
 	sub_l.text = "%d км/ч, приз за первое место %s" % [int(st.kmh), S.fmt(t.prize)]
 	var pr: float = min(0.95, float(D.gear.suits[int(g.suit)].prot) + float(D.gear.helmets[int(g.helmet)].prot))
-	var safe := S.safe_kmh(pr)
+	var hurt := S.fall_pct(float(st.kmh), pr)
 	warn_l.text = ""
-	if safe < float(st.kmh):
-		warn_l.text = "С такой защитой падение быстрее %d км/ч смертельно" % int(round(safe))
+	if hurt >= 30:
+		warn_l.text = "Падение на полной скорости снимет %d%% здоровья%s" % [hurt, ", два таких подряд и больница" if hurt >= 50 else ""]
+	warn_l.add_theme_color_override("font_color", Color("#ff6a5e") if hurt >= 50 else UiKit.YEL)
 	var u: Dictionary = S.upgrades(bike.id)
 	room.show_rig(bike, int(u.paint), D.outfit(int(g.suit), int(g.suitColor), int(g.helmColor), int(g.glove), int(g.boot)), int(g.helmet), S.start_weapon(int(g.suit)), true)
 	UiKit.clear(list.box)

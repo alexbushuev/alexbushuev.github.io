@@ -153,6 +153,7 @@ func _race_count() -> void:
 			first = f
 			break
 	first.s = sim.me.s + 50.0
+	sim._calc_ps(first)
 	var before := sim.live_place()
 	first.out = true
 	check(sim.racers_left() == 7, "one out: %d" % sim.racers_left())

@@ -46,6 +46,7 @@ var sound_box: Control
 var sliders: Array = []    # [save key, name, label, bar]
 var list: ScrollList
 var preview_engine := false
+var mirror_btn: Button
 var made_engine := false
 
 func open(a: GameAudio) -> void:
@@ -95,6 +96,15 @@ func open(a: GameAudio) -> void:
 		bar.let_go.connect(func() -> void: _slider_released(key))
 		left.add_child(bar)
 		sliders.append([key, x[1], l, bar])
+	var mir := UiKit.button("", func() -> void:
+		S.data.mirrors = not bool(S.data.get("mirrors", true))
+		S.persist()
+		_render_mirrors(), UiKit.INK3, UiKit.PAPER, 15)
+	mir.name = "Mirrors"
+	mir.custom_minimum_size = Vector2(0, 36)
+	left.add_child(mir)
+	mirror_btn = mir
+	_render_mirrors()
 	list = ScrollList.new()
 	list.size_flags_stretch_ratio = 1.2
 	cols.add_child(list)
@@ -111,6 +121,11 @@ func _render_sound() -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		sound_box.add_child(b)
 	_label_sliders()
+
+func _render_mirrors() -> void:
+	if mirror_btn != null:
+		var on: bool = bool(S.data.get("mirrors", true))
+		mirror_btn.text = "Зеркала: включены" if on else "Зеркала: выключены (быстрее на слабом телефоне)"
 
 func _set_sound(on: bool) -> void:
 	S.data.sound = on

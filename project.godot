@@ -8,6 +8,7 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 [autoload]
 D="*res://src/data.gd"
 S="*res://src/save.gd"
+N="*res://src/net.gd"
 
 [display]
 window/size/viewport_width=844

@@ -4,6 +4,7 @@ class_name BikeView extends Node3D
 
 var r: Sim.Rider
 var road: Road
+var sim_ref: Sim
 var lean_node: Node3D
 var bike_scene: Node3D
 var front: Node3D
@@ -24,6 +25,8 @@ var hit_flash := 0.0
 var flail_t := 0.0
 var cop_lights: MeshInstance3D
 var _detached := false
+var body_yaw := 0.0
+var run_clock := 0.0
 
 static var _wheel_mat: ShaderMaterial
 static var _blob_mesh: QuadMesh
@@ -39,9 +42,10 @@ func _paint_material(pal: Array, ambient := 0.62) -> ShaderMaterial:
 	m.set_shader_parameter("ambient", Vector3.ONE * ambient)
 	return m
 
-func setup(rider: Sim.Rider, rd: Road) -> void:
+func setup(rider: Sim.Rider, sim: Sim) -> void:
 	r = rider
-	road = rd
+	sim_ref = sim
+	road = sim.road if sim != null else null
 	var art: String = r.bike.art
 	meta = D.models.bikes[art]
 	lean_node = Node3D.new()
@@ -288,6 +292,60 @@ func _pose_flying(delta: float) -> void:
 	var fr := hips + Vector3(0.3, -0.72, sin(a + 3.0) * 0.35 * s)
 	_pose(hips, q_h, q_spine, q_h, hl, hr, fl, fr)
 
+# On foot after a fall: getting up, running to the bike, lifting it by the handlebar
+func _pose_on_foot(delta: float, f: Vector3) -> void:
+	var ground := road.world(r.fly_s, r.fly_d, 0.0)
+	var rgt := f.cross(Vector3.UP).normalized()
+	var want_yaw := 0.0
+	if r.run_phase == 2:
+		var to := road.world(r.s + 0.35, r.d + r.run_side * 0.72) - ground
+		to.y = 0.0
+		if to.length() > 0.05:
+			want_yaw = atan2(to.dot(rgt), to.dot(f))
+	elif r.run_phase == 3:
+		want_yaw = -r.run_side * PI * 0.5
+	if r.run_phase == 1:
+		body_yaw = 0.0
+	else:
+		body_yaw = lerp_angle(body_yaw, want_yaw, min(1.0, delta * 12.0))
+	var face: Vector3 = f.rotated(Vector3.UP, -body_yaw)
+	var basis := Basis.looking_at(Vector3(face.x, 0.0, face.z).normalized(), Vector3.UP)
+	var up_q := Quaternion.IDENTITY
+	match r.run_phase:
+		1:
+			var w: float = smoothstep(0.0, 1.0, clamp(r.run_t / 0.5, 0.0, 1.0))
+			rider_root.global_transform = Transform3D(basis * Basis(Vector3.RIGHT, -PI * 0.5 * (1.0 - w)), ground + Vector3.UP * 0.18 * (1.0 - w))
+			var crouch: float = sin(w * PI) * 0.35
+			var hips := Vector3(0, 0.95 - crouch, 0.05)
+			_pose(hips, Quaternion.IDENTITY, Quaternion(Vector3.RIGHT, -0.5 * (1.0 - w) - crouch), up_q,
+				Vector3(-0.3, 0.7 - crouch, -0.25), Vector3(0.3, 0.7 - crouch, -0.25), Vector3(-0.13, 0.14, -0.05), Vector3(0.13, 0.14, -0.05))
+		2:
+			rider_root.global_transform = Transform3D(basis, ground)
+			run_clock += delta * 2.0 * PI * 1.55
+			var ph: float = run_clock
+			var hips2 := Vector3(0, 0.9 + 0.05 * abs(sin(ph)), 0)
+			var q_sp := Quaternion(Vector3.RIGHT, -0.32) * Quaternion(Vector3.UP, 0.18 * sin(ph))
+			var fl := Vector3(-0.11, 0.14 + 0.26 * max(0.0, sin(ph)), -0.4 * cos(ph))
+			var fr := Vector3(0.11, 0.14 + 0.26 * max(0.0, -sin(ph)), 0.4 * cos(ph))
+			var hl := Vector3(-0.26, 0.98 + 0.08 * cos(ph), 0.28 * cos(ph))
+			var hr := Vector3(0.26, 0.98 - 0.08 * cos(ph), -0.28 * cos(ph))
+			_pose(hips2, Quaternion(Vector3.RIGHT, -0.1), q_sp, Quaternion(Vector3.RIGHT, 0.12), hl, hr, fl, fr)
+		3:
+			rider_root.global_transform = Transform3D(basis, ground)
+			var w3: float = clamp(r.run_t / 0.7, 0.0, 1.0)
+			var bend: float = lerp(1.05, 0.3, w3)
+			var hips3 := Vector3(0, lerp(0.8, 0.93, w3), 0.12)
+			# hands on the grips wherever the rising bike has them
+			var inv := rider_root.global_transform.affine_inverse()
+			var by: Array = meta.bar
+			var bw: float = meta.bw
+			var g1 := inv * (lean_node.global_transform * Vector3(-(bw - 0.05), float(by[1]), -float(by[0])))
+			var g2 := inv * (lean_node.global_transform * Vector3(bw - 0.05, float(by[1]), -float(by[0])))
+			var hl3: Vector3 = g1 if g1.x < g2.x else g2
+			var hr3: Vector3 = g2 if g1.x < g2.x else g1
+			_pose(hips3, Quaternion(Vector3.RIGHT, -0.2), Quaternion(Vector3.RIGHT, -bend), Quaternion(Vector3.RIGHT, 0.4),
+				hl3, hr3, Vector3(-0.16, 0.14, 0.08), Vector3(0.16, 0.14, 0.08))
+
 func _place_on_road(s: float, d: float, yaw: float) -> void:
 	var p := road.world(s, d)
 	var f := road.fwd_at(s)
@@ -300,15 +358,17 @@ func _place_on_road(s: float, d: float, yaw: float) -> void:
 	global_transform = Transform3D(b, p)
 
 func refresh(delta: float, cam_s: float) -> void:
-	var dist: float = abs(r.s - cam_s)
+	if sim_ref != null:
+		road = sim_ref.rd(r)
+	var dist: float = abs(r.ps - cam_s)
 	var near := dist < 90.0
 	visible = dist < 620.0
 	if not visible:
 		return
 	if r.state == Sim.DOWN:
 		_place_on_road(r.s, r.d, r.psi if r.is_me else 0.0)
-		# bike lies down and scrapes along
-		var side := 1.0 if r.lean >= 0.0 else -1.0
+		# bike lies down and scrapes along, and comes up again when he lifts it
+		var side: float = r.bike_side
 		lean_node.rotation = Vector3(0, 0, -side * lerp(abs(r.lean), 1.42, r.bike_rot))
 		lean_node.position = Vector3.UP * lerp(0.0, 0.22, r.bike_rot)
 		if not _detached:
@@ -318,15 +378,19 @@ func refresh(delta: float, cam_s: float) -> void:
 			spin_a = 0.0
 			for key in weapon_nodes:
 				weapon_nodes[key].visible = false
-		spin_a += r.spin * delta
-		var fp := road.world(r.fly_s, r.fly_d, r.fly_y)
 		var f := road.fwd_at(r.fly_s)
-		var b := Basis.looking_at(f, Vector3.UP) * Basis(Vector3.RIGHT, spin_a) * Basis(Vector3.BACK, spin_a * 0.35)
-		var settled: bool = r.fly_y <= 0.19 and abs(r.fly_v) < 1.0
-		if settled:
-			b = Basis.looking_at(f, Vector3.UP) * Basis(Vector3.RIGHT, -PI * 0.5)
-		rider_root.global_transform = Transform3D(b, fp - b * Vector3(0, 0.95, 0))
-		_pose_flying(delta if not settled else delta * 0.1)
+		if r.run_phase == 0:
+			spin_a += r.spin * delta
+			var fp := road.world(r.fly_s, r.fly_d, r.fly_y)
+			var b := Basis.looking_at(f, Vector3.UP) * Basis(Vector3.RIGHT, spin_a) * Basis(Vector3.BACK, spin_a * 0.35)
+			var settled: bool = r.fly_y <= 0.19 and abs(r.fly_v) < 1.0
+			if settled:
+				b = Basis.looking_at(f, Vector3.UP) * Basis(Vector3.RIGHT, -PI * 0.5)
+			rider_root.global_transform = Transform3D(b, fp - b * Vector3(0, 0.95, 0))
+			_pose_flying(delta if not settled else delta * 0.1)
+			body_yaw = 0.0
+		else:
+			_pose_on_foot(delta, f)
 		blob.visible = false
 	else:
 		if _detached:

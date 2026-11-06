@@ -645,6 +645,107 @@ def make_decor():
     k.box((0, -.03, 1.25), (1.2, .03, .7), hexc('#ffc81f'), g)
     k.box((0, -.05, 1.25), (.4, .01, .55), hexc('#16151b'), g)
     done(g)
+    # ---------- build 8: more by the road ----------
+    g = 'stop2'   # village bus shelter, brick, open to the road
+    k.box((0, .9, 1.25), (4.2, .25, 2.5), slot(WALL2), g)
+    for x in (-2.0, 2.0):
+        k.box((x, .1, 1.25), (.25, 1.6, 2.5), slot(WALL2), g)
+    k.box((0, .2, 2.6), (4.8, 2.2, .2), slot(ROOF), g)
+    k.box((0, .5, .45), (3.4, .45, .08), slot(WOOD), g)
+    k.box((0, .78, 1.6), (1.6, .03, .9), hexc('#f3eedf'), g)
+    done(g)
+    g = 'slimit'  # round speed sign, the digits are drawn by the game
+    k.tube((0, 0, 0), (0, 0, 2.2), .045, slot(METAL), g, verts=5, smooth=False)
+    k.disc((0, -.03, 2.5), .42, .03, hexc('#d9232e'), g, verts=18, axis='y')
+    k.disc((0, -.05, 2.5), .32, .01, hexc('#f3eedf'), g, verts=18, axis='y')
+    done(g)
+    g = 'bigsign'  # blue direction sign on two legs
+    for x in (-1.5, 1.5):
+        k.tube((x, 0, 0), (x, 0, 3.2), .07, slot(METAL), g, verts=6, smooth=False)
+    k.box((0, -.05, 3.4), (3.8, .06, 1.5), hexc('#1f4fb8'), g)
+    k.box((0, -.085, 3.4), (3.6, .01, 1.3), hexc('#2a62d6'), g)
+    done(g)
+    g = 'tsign'  # white road sign with a black border: town names, distances
+    k.tube((0, 0, 0), (0, 0, 2.0), .05, slot(METAL), g, verts=5, smooth=False)
+    k.box((0, -.03, 2.35), (2.0, .04, .8), hexc('#16151b'), g)
+    k.box((0, -.055, 2.35), (1.88, .01, .68), hexc('#f3eedf'), g)
+    done(g)
+    g = 'deck'  # overpass: the deck runs across our road, 64 m end to end, with its abutments
+    k.box((0, 0, 6.9), (64, 11, .8), hexc('#8d8a82'), g)
+    k.box((0, 0, 6.3), (64, 9, .4), hexc('#6e6b64'), g)
+    for y in (-5.4, 5.4):
+        k.box((0, y, 7.75), (64, .25, .9), hexc('#b0ada4'), g)
+        k.box((0, y * 1.015, 7.0), (64, .06, .35), hexc('#ffc81f'), g)
+    for x in (-33.5, 33.5):
+        k.box((x, 0, 3.5), (3.0, 12, 7.0), hexc('#7d7a72'), g)
+    done(g)
+    g = 'pillar'  # a bridge support: grey, with yellow and black at riding height
+    k.tube((0, 0, 0), (0, 0, 6.3), .42, hexc('#9a978e'), g, verts=10, smooth=False)
+    for i in range(5):
+        k.tube((0, 0, i * .32), (0, 0, i * .32 + .32), .44, hexc('#ffc81f') if i % 2 == 0 else hexc('#16151b'), g, verts=10, smooth=False)
+    k.box((0, 0, 6.1), (1.4, 1.4, .4), hexc('#8d8a82'), g)
+    done(g)
+    g = 'rock'
+    k.blob((0, 0, .45), (.9, .75, .6), hexc('#7a746a'), g, seg=6, rings=4)
+    k.blob((.4, .3, .3), (.45, .4, .35), hexc('#6a645a'), g, seg=5, rings=3)
+    done(g)
+    g = 'hole'   # pothole: a dark patch with a broken rim
+    k.disc((0, 0, .015), .55, .02, hexc('#2a2622'), g, verts=10, axis='z')
+    k.disc((.1, .05, .02), .38, .02, hexc('#14120f'), g, verts=8, axis='z')
+    done(g)
+    g = 'wreck'  # an abandoned car, rusty
+    k.box((0, 0, .65), (1.8, 4.2, .75), hexc('#7d4a2a'), g)
+    k.box((0, .2, 1.25), (1.6, 2.0, .55), hexc('#6a3e22'), g)
+    k.box((0, -.82, 1.25), (1.5, .04, .45), GLASS, g)
+    for x in (-.85, .85):
+        for y in (-1.3, 1.4):
+            k.disc((x, y, .3), .3, .2, RUBBER, g, verts=8)
+    done(g)
+    g = 'gore'   # chevron board where a side road splits off
+    for x in (-.7, .7):
+        k.box((x, 0, .45), (.08, .08, .9), slot(METAL), g)
+    k.box((0, -.04, .8), (1.8, .05, .5), hexc('#ffc81f'), g)
+    for i in range(4):
+        k.box((-.6 + i * .4, -.07, .8), (.16, .01, .5), hexc('#16151b'), g, rot=(0, .6, 0))
+    done(g)
+    g = 'hay'
+    k.blob((0, 0, .9), (1.4, 1.4, 1.1), hexc('#c9a24a'), g, seg=8, rings=5)
+    k.blob((0, 0, 1.75), (.55, .55, .4), hexc('#b08a3a'), g, seg=6, rings=3)
+    done(g)
+    g = 'shed'
+    k.box((0, 0, 1.2), (4, 3, 2.4), slot(WOOD), g)
+    k.tube((-2.2, 0, 2.6), (2.2, 0, 2.6), 1.9, slot(ROOF), g, verts=3, smooth=False)
+    k.box((.6, -1.52, .9), (.9, .04, 1.8), slot(DARK), g)
+    done(g)
+    g = 'pylon'  # power line tower
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            k.tube((sx * 2.2, sy * 2.2, 0), (sx * .5, sy * .5, 24), .1, hexc('#8d9098'), g, verts=4, smooth=False)
+    for z, w in ((8, 3.4), (14, 2.6), (19, 1.6)):
+        k.box((0, 0, z), (w * 2 + .3, .2, .2), hexc('#8d9098'), g)
+        k.box((0, 0, z), (.2, w * 2 + .3, .2), hexc('#8d9098'), g)
+    k.box((0, 0, 20.5), (10, .3, .3), hexc('#8d9098'), g)
+    k.box((0, 0, 23.0), (6.5, .3, .3), hexc('#8d9098'), g)
+    done(g)
+    g = 'garage'  # a row of four lock-up garages
+    k.box((0, 0, 1.4), (14, 6, 2.8), slot(WALL), g)
+    k.box((0, 0, 2.9), (14.4, 6.4, .2), slot(DARK), g)
+    for i in range(4):
+        k.box((-5.25 + i * 3.5, -3.02, 1.15), (2.6, .04, 2.2), hexc(('#4a6a8a', '#8a4a3a', '#5a7a4a', '#7a7a7a')[i]), g)
+    done(g)
+    g = 'khrush'  # five-storey block
+    k.box((0, 0, 7.5), (42, 12, 15), slot(WALL2), g)
+    windows(g, -20, 20, -6.04, 0, 15, 14, 5, 1.3, 1.3)
+    for i in range(4):
+        k.box((-15 + i * 10, -6.4, 1.3), (2.2, .8, .15), slot(ROOF), g)
+    k.box((0, 0, 15.2), (42.4, 12.4, .4), slot(ROOF), g)
+    done(g)
+    for i, c in enumerate(('#b8541a', '#2f6fb0', '#3f7a55')):
+        g = 'cont%d' % (i + 1)  # shipping containers
+        k.box((0, 0, 1.3), (2.45, 6.0, 2.6), hexc(c), g)
+        for y in range(-2, 3):
+            k.box((-1.24, y * 1.1, 1.3), (.04, .5, 2.4), col(*(v * .8 for v in hexc(c)[:3])), g)
+        done(g)
     # start and finish gantry, spans 19 m across all four lanes
     for g, c1 in (('start', '#ffc81f'), ('finish', '#f3eedf')):
         for x in (-9.6, 9.6):

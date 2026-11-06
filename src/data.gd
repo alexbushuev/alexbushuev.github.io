@@ -71,6 +71,13 @@ func stats_of(b: Dictionary, u: Dictionary) -> Dictionary:
 func world_speed(kmh: float) -> float:
 	return 9.72 + 0.1116 * kmh
 
+# A fall hurts more the faster and the less protected you are, but one fall alone never takes more than the cap:
+# it takes two bad ones in a row to end up in hospital
+func fall_injury(kmh: float, prot: float, knock := false) -> float:
+	var raw: float = kmh * float(rules.fall_k) * (1.0 - prot) * (0.6 if knock else 1.0)
+	var cap: float = float(rules.fall_cap)
+	return cap * (1.0 - exp(-raw / cap))
+
 func grip_f(grip: float) -> float:
 	return 1.35 - 0.0075 * grip
 
