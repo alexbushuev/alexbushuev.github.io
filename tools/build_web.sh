@@ -16,6 +16,8 @@ for f in build/web/*; do
     *) cp "$f" "$DIST/$b" ;;
   esac
 done
+# the home-screen icons and the app manifest: a phone opens the game from there without the browser's panels
+for f in web/static/*; do case "$(basename "$f")" in .gdignore) ;; *) cp "$f" "$DIST/" ;; esac; done
 rm -f "$DIST/.gdignore"
 ( cd "$DIST" && for f in *; do echo "$(sha256sum "$f" | cut -d' ' -f1) $(stat -c %s "$f") $f"; done ) > "$ROOT/build/manifest.txt"
 mv "$ROOT/build/manifest.txt" "$DIST/manifest.txt"

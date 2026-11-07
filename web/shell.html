@@ -6,6 +6,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#17161c">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Газ и цепь">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="app.webmanifest">
 <title>Газ и цепь 3D</title>
 <style>
 html,body{margin:0;height:100%;background:#17161c;overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
@@ -129,6 +133,35 @@ window.gazAccount = (function () {
     } catch (x) { err.textContent = 'Нет связи с сервером'; go.disabled = false; }
   });
   return { open(b, m, s, c) { base = b; save = s; cb = c; show(m); el.style.display = 'flex'; setTimeout(() => lg.focus(), 60); } };
+})();
+</script>
+<script>
+/* Full screen. The browser only lets a page go full screen inside a real tap or click, and Godot handles its taps a frame
+   later. So the game's button, when pressed down, arms this, and the release of that same tap does it here.
+   iPhone Safari has no full screen for pages at all; there the game is put on the home screen and opens without the panels. */
+window.gazScreen = (function () {
+  const de = document.documentElement;
+  const req = de.requestFullscreen || de.webkitRequestFullscreen;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  const can = !!req && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  const app = () => navigator.standalone === true || matchMedia('(display-mode: fullscreen)').matches || matchMedia('(display-mode: standalone)').matches;
+  const full = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  let armed = 0;
+  const toggle = () => {
+    try {
+      if (full()) { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); }
+      else { const p = req.call(de, { navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {}); }
+    } catch (e) {}
+  };
+  const fire = () => { if (armed && performance.now() - armed < 1500) { armed = 0; toggle(); } };
+  ['pointerup', 'touchend', 'mouseup'].forEach(e => window.addEventListener(e, fire, { capture: true, passive: true }));
+  const ios = /iPhone|iPod/.test(navigator.userAgent);
+  return {
+    // a page in full screen also matches display-mode: fullscreen, so that is checked first
+    state() { return full() ? 'full' : (app() ? 'app' : (can ? 'window' : (ios ? 'iphone' : 'none'))); },
+    arm() { armed = performance.now(); },
+    late() { if (armed) { armed = 0; toggle(); } }
+  };
 })();
 </script>
 <script src="$GODOT_URL?v=__BUILD__"></script>

@@ -134,6 +134,78 @@ func _button(txt: String, cb: Callable, col := UiKit.INK3, fg := UiKit.PAPER, sz
 func _label(txt: String, f: Font, sz: int, col: Color) -> Label:
 	return UiKit.label(txt, f, sz, col)
 
+# ---------- full screen ----------
+# "window" or "full" where the page can go full screen, "app" when it already runs from the home screen without panels,
+# "iphone" where Safari cannot do it for a page, "none" elsewhere
+func _screen_state() -> String:
+	if OS.has_feature("web"):
+		return str(JavaScriptBridge.eval("window.gazScreen ? window.gazScreen.state() : 'none'", true))
+	return "full" if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN else "window"
+
+# A square button with four corners drawn on it: pointing out to go full screen, in to come back.
+func _screen_button() -> Button:
+	var st := _screen_state()
+	if st == "app" or st == "none":
+		return null
+	var b := _button("", func() -> void:
+		var now := _screen_state()
+		if now == "iphone":
+			_iphone_tip()
+		elif OS.has_feature("web"):
+			JavaScriptBridge.eval("window.gazScreen.late()")
+		else:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if now == "full" else DisplayServer.WINDOW_MODE_FULLSCREEN))
+	b.name = "FullScreen"
+	b.pressed.connect(func() -> void:
+		# the page needs a moment to change; the corners then turn the other way
+		get_tree().create_timer(0.5).timeout.connect(b.queue_redraw))
+	b.custom_minimum_size = Vector2(46, 38)
+	b.tooltip_text = "Во весь экран"
+	if OS.has_feature("web") and st != "iphone":
+		# the press arms the page; the release of the same tap is the real tap the browser wants
+		b.button_down.connect(func() -> void: JavaScriptBridge.eval("window.gazScreen.arm()"))
+	b.draw.connect(func() -> void:
+		var r := Rect2(Vector2.ZERO, b.size).grow(-10.0)
+		var inward: bool = _screen_state() == "full"
+		var k: float = 7.0
+		var c := UiKit.PAPER
+		for corner in [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]:
+			var p: Vector2 = r.position + r.size * corner
+			var sx: float = 1.0 if corner.x == 0.0 else -1.0
+			var sy: float = 1.0 if corner.y == 0.0 else -1.0
+			var tip: Vector2 = p + Vector2(sx, sy) * (k if inward else 0.0)
+			b.draw_line(tip, tip + Vector2(sx * (-k if inward else k), 0), c, 2.5)
+			b.draw_line(tip, tip + Vector2(0, sy * (-k if inward else k)), c, 2.5))
+	get_viewport().size_changed.connect(b.queue_redraw)
+	return b
+
+# iPhone Safari keeps its panels for any page: the game goes on the home screen instead and opens from there clean
+func _iphone_tip() -> void:
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.75)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	menu.add_child(dim)
+	var c := CenterContainer.new()
+	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.add_child(c)
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("#24232b")
+	sb.set_content_margin_all(18)
+	p.add_theme_stylebox_override("panel", sb)
+	p.custom_minimum_size = Vector2(520, 0)
+	c.add_child(p)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	p.add_child(v)
+	v.add_child(_label("Во весь экран на iPhone", font_big, 26, UiKit.YEL))
+	var t := _label("Safari на iPhone не даёт странице убрать свои панели. Зато игру можно поставить на экран «Домой»: "
+		+ "нажми «Поделиться» внизу, потом «На экран «Домой»». Открывай игру с этого значка: она запустится как приложение, без адресной строки и вкладок. "
+		+ "Прогресс тот же, если ты вошёл в аккаунт.", font_small, 16, UiKit.PAPER)
+	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(t)
+	v.add_child(_button("Понятно", func() -> void: dim.queue_free(), UiKit.YEL, UiKit.INK))
+
 func _drop_room() -> void:
 	if room != null:
 		view_port.remove_child(room)
@@ -172,6 +244,9 @@ func _show_menu() -> void:
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(sp)
 	head.add_child(_label(S.fmt(S.data.money), font_big, 24, UiKit.PAPER))
+	var fs := _screen_button()
+	if fs != null:
+		head.add_child(fs)
 	var acc := _button(N.login if N.logged_in() else "Войти", _open_account, UiKit.INK3 if N.logged_in() else UiKit.GRN, UiKit.PAPER)
 	head.add_child(acc)
 	v.add_child(head)
